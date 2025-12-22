@@ -12,7 +12,7 @@ import {
   AlertCircle,
   Check,
   PackageOpen,
-  Search // <--- Added Search Icon
+  Search
 } from 'lucide-react';
 
 export default function AddProduct() {
@@ -27,7 +27,7 @@ export default function AddProduct() {
   // 2. Local State
   const [selectedColorIds, setSelectedColorIds] = useState([]);
   const [colorImages, setColorImages] = useState({});
-  const [colorSearch, setColorSearch] = useState(''); // <--- New State for Search
+  const [colorSearch, setColorSearch] = useState('');
 
   // 3. Form Setup
   const { register, handleSubmit, watch, setValue, formState: { dirtyFields } } = useForm({
@@ -90,7 +90,7 @@ export default function AddProduct() {
         uploadPreset: uploadPreset,
         sources: ['local', 'url'],
         multiple: true,
-        maxImageFileSize: 2000000,
+        maxImageFileSize: 10000000, // <--- 10MB Limit Enforced Here
         styles: {
           palette: {
             window: "#FFFFFF",
@@ -212,9 +212,9 @@ export default function AddProduct() {
       {/* Header */}
       <div className="flex items-center justify-between mb-10">
         <div className="flex items-center gap-4">
-          <button type="button" onClick={() => navigate(-1)} className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-slate-800 hover:border-slate-300 transition-all shadow-sm">
+          {/* <button type="button" onClick={() => navigate(-1)} className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-slate-800 hover:border-slate-300 transition-all shadow-sm">
             <ArrowLeft size={20} />
-          </button>
+          </button> */}
           <div>
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Create Product</h1>
             <p className="text-slate-500 mt-1">Add a new style to your collection</p>
@@ -245,7 +245,7 @@ export default function AddProduct() {
               <div>
                 <label className="label">Price (₹)</label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-medium">₹</span>
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 font-medium">₹</span>
                   <input type="number" {...register('price', { required: "Price is required" })} className="input-field pl-8" placeholder="0.00" />
                 </div>
               </div>
@@ -399,12 +399,12 @@ export default function AddProduct() {
         {/* RIGHT COLUMN: Sidebar/Status */}
         <div className="lg:col-span-4 space-y-8">
 
-          {/* Color Picker Card */}
-          <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm sticky top-6">
+          {/* Color Picker Card - Sticky on Desktop only */}
+          <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:sticky lg:top-6">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">Color Variants</h2>
             <p className="text-sm text-slate-500 mb-4">Select all colors available for this product.</p>
 
-            {/* --- NEW SEARCH BAR --- */}
+            {/* Search Bar */}
             <div className="relative mb-4">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
               <input
@@ -416,7 +416,10 @@ export default function AddProduct() {
               />
             </div>
 
-            <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+            <div
+              className="space-y-3 overflow-y-auto pr-2"
+              style={{ maxHeight: '300px', scrollbarWidth: 'thin' }} // Fixed height + standard thin scrollbar
+            >
               {filteredColors.length === 0 ? (
                 <div className="text-center py-8 text-slate-400 text-sm">No colors found</div>
               ) : (
@@ -427,17 +430,16 @@ export default function AddProduct() {
                       type="button"
                       key={col.id}
                       onClick={() => toggleColor(col.id)}
-                      className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all duration-200 group ${
-                        isSelected
+                      className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all duration-200 group ${isSelected
                           ? 'bg-slate-900 border-slate-900 text-white shadow-md'
                           : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-3">
                         <div className={`w-6 h-6 rounded-full border ${isSelected ? 'border-white/20' : 'border-slate-200'}`} style={{ backgroundColor: col.hex_code }}></div>
-                        <span className="font-medium">{col.name}</span>
+                        <span className="font-medium text-left">{col.name}</span>
                       </div>
-                      {isSelected && <Check size={16} className="text-white" />}
+                      {isSelected && <Check size={16} className="text-white shrink-0" />}
                     </button>
                   );
                 })
@@ -452,23 +454,30 @@ export default function AddProduct() {
             )}
           </section>
 
-          {/* Action Buttons */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:sticky lg:top-[500px]">
-            <h2 className="text-lg font-semibold text-slate-900 mb-4">Publishing</h2>
-            <div className="space-y-3">
+          {/* Action Buttons - FIXED BOTTOM BAR on Mobile / Sticky Card on Desktop */}
+          <div className={`
+            fixed bottom-0 left-0 right-0 z-50 p-4 bg-white border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]
+            lg:static lg:z-auto lg:p-6 lg:rounded-2xl lg:border lg:shadow-sm lg:sticky lg:top-[500px]
+          `}>
+            <div className="hidden lg:block">
+              <h2 className="text-lg font-semibold text-slate-900 mb-4">Publishing</h2>
+            </div>
+
+            {/* Grid for Mobile (Side-by-side) / Column for Desktop */}
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-1 lg:gap-3">
               <button
                 type="submit"
                 disabled={loading}
                 className="w-full py-3.5 bg-slate-900 text-white font-medium rounded-xl hover:bg-indigo-600 transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                {loading ? <Loader2 className="animate-spin" size={20} /> : <><Save size={20} /> Launch Product</>}
+                {loading ? <Loader2 className="animate-spin" size={20} /> : <><Save size={20} /> <span className="hidden sm:inline">Launch Product</span><span className="sm:hidden">Launch</span></>}
               </button>
               <button
                 type="button"
                 onClick={() => navigate('/')}
                 className="w-full py-3.5 bg-white text-slate-600 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors"
               >
-                Save as Draft
+                <span className="hidden sm:inline">Save as Draft</span><span className="sm:hidden">Draft</span>
               </button>
             </div>
           </div>
