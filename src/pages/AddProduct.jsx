@@ -7,12 +7,12 @@ import {
   Save,
   Image as ImageIcon,
   Loader2,
-  ArrowLeft,
   Trash2,
   AlertCircle,
   Check,
   PackageOpen,
-  Search
+  Search,
+  X
 } from 'lucide-react';
 
 export default function AddProduct() {
@@ -90,7 +90,7 @@ export default function AddProduct() {
         uploadPreset: uploadPreset,
         sources: ['local', 'url'],
         multiple: true,
-        maxImageFileSize: 10000000, // <--- 10MB Limit Enforced Here
+        maxImageFileSize: 10000000,
         styles: {
           palette: {
             window: "#FFFFFF",
@@ -200,7 +200,6 @@ export default function AddProduct() {
     }));
   };
 
-  // Helper to filter colors
   const filteredColors = meta.colors.filter(c =>
     c.name.toLowerCase().includes(colorSearch.toLowerCase())
   );
@@ -212,9 +211,6 @@ export default function AddProduct() {
       {/* Header */}
       <div className="flex items-center justify-between mb-10">
         <div className="flex items-center gap-4">
-          {/* <button type="button" onClick={() => navigate(-1)} className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-slate-800 hover:border-slate-300 transition-all shadow-sm">
-            <ArrowLeft size={20} />
-          </button> */}
           <div>
             <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Create Product</h1>
             <p className="text-slate-500 mt-1">Add a new style to your collection</p>
@@ -329,7 +325,7 @@ export default function AddProduct() {
 
                       <div className="grid grid-cols-2 gap-3">
                         {myImages.map((url, i) => (
-                          <div key={i} className="group relative aspect-[3/4] rounded-lg overflow-hidden border border-slate-200 bg-slate-100">
+                          <div key={i} className="group relative aspect-3/4 rounded-lg overflow-hidden border border-slate-200 bg-slate-100">
                             <img src={url} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
                             <button
@@ -344,7 +340,7 @@ export default function AddProduct() {
                         <button
                           type="button"
                           onClick={() => openWidget(colorId)}
-                          className="aspect-[3/4] border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50/50 transition-all group"
+                          className="aspect-3/4 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50/50 transition-all group"
                         >
                           <div className="p-3 bg-slate-50 rounded-full mb-2 group-hover:bg-white group-hover:shadow-sm transition-all">
                             <ImageIcon size={20} />
@@ -397,10 +393,11 @@ export default function AddProduct() {
         </div>
 
         {/* RIGHT COLUMN: Sidebar/Status */}
-        <div className="lg:col-span-4 space-y-8">
+        {/* CHANGED: Made the WHOLE sidebar sticky, not individual cards */}
+        <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-6 lg:h-fit">
 
-          {/* Color Picker Card - Sticky on Desktop only */}
-          <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm lg:sticky lg:top-6">
+          {/* Color Picker Card */}
+          <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">Color Variants</h2>
             <p className="text-sm text-slate-500 mb-4">Select all colors available for this product.</p>
 
@@ -418,7 +415,7 @@ export default function AddProduct() {
 
             <div
               className="space-y-3 overflow-y-auto pr-2"
-              style={{ maxHeight: '300px', scrollbarWidth: 'thin' }} // Fixed height + standard thin scrollbar
+              style={{ maxHeight: '300px', scrollbarWidth: 'thin' }}
             >
               {filteredColors.length === 0 ? (
                 <div className="text-center py-8 text-slate-400 text-sm">No colors found</div>
@@ -454,33 +451,36 @@ export default function AddProduct() {
             )}
           </section>
 
-          {/* Action Buttons - FIXED BOTTOM BAR on Mobile / Sticky Card on Desktop */}
-          <div className={`
-            fixed bottom-0 left-0 right-0 z-50 p-4 bg-white border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)]
-            lg:static lg:z-auto lg:p-6 lg:rounded-2xl lg:border lg:shadow-sm lg:sticky lg:top-[500px]
-          `}>
-            <div className="hidden lg:block">
-              <h2 className="text-lg font-semibold text-slate-900 mb-4">Publishing</h2>
-            </div>
+          {/* Action Buttons - FIXED BOTTOM MOBILE / STATIC DESKTOP */}
+          <div className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-white border-t border-slate-200 lg:static lg:z-auto lg:border-none lg:shadow-none lg:p-0 lg:bg-transparent">
+            <div className="lg:bg-white lg:p-6 lg:rounded-2xl lg:border lg:border-slate-200 lg:shadow-sm">
+              <div className="hidden lg:block mb-4">
+                <h2 className="text-lg font-semibold text-slate-900">Publishing</h2>
+                <p className="text-sm text-slate-500">Ready to publish this product?</p>
+              </div>
 
-            {/* Grid for Mobile (Side-by-side) / Column for Desktop */}
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-1 lg:gap-3">
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-3.5 bg-slate-900 text-white font-medium rounded-xl hover:bg-indigo-600 transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                {loading ? <Loader2 className="animate-spin" size={20} /> : <><Save size={20} /> <span className="hidden sm:inline">Launch Product</span><span className="sm:hidden">Launch</span></>}
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate('/')}
-                className="w-full py-3.5 bg-white text-slate-600 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors"
-              >
-                <span className="hidden sm:inline">Save as Draft</span><span className="sm:hidden">Draft</span>
-              </button>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex items-center justify-center gap-2 w-full py-3 bg-slate-900 text-white font-medium rounded-xl hover:bg-slate-800 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+                  <span>{loading ? 'Saving...' : 'Launch Product'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => navigate('/')}
+                  className="flex items-center justify-center gap-2 w-full py-3 bg-white text-slate-600 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors"
+                >
+                  <X size={20} />
+                  <span>Cancel</span>
+                </button>
+              </div>
             </div>
           </div>
+
         </div>
       </form>
     </div>

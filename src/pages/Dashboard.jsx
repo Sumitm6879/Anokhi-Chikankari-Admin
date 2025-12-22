@@ -28,11 +28,14 @@ export default function Dashboard() {
         .from('orders')
         .select('*', { count: 'exact', head: true });
 
+      // FIXED: Only count "Active" products for the "Active Products" card
       const { count: productsCount } = await supabase
         .from('products')
-        .select('*', { count: 'exact', head: true });
+        .select('*', { count: 'exact', head: true })
+        .eq('is_active', true);
 
-      // 2. Get Low Stock Items (< 5 quantity)
+      // 2. Get Low Stock Items (< 5 quantity) AND Active Product
+      // We use !inner to enforce filtering on the joined table
       const { data: lowStockData, error } = await supabase
         .from('product_variants')
         .select(`
@@ -40,8 +43,9 @@ export default function Dashboard() {
           stock_quantity,
           size:sizes(name),
           color:colors(name),
-          product:products(name)
+          product:products!inner(name, is_active)
         `)
+        .eq('product.is_active', true) // <--- The Fix: Ignore archived products
         .lt('stock_quantity', 5)
         .order('stock_quantity', { ascending: true })
         .limit(5);
@@ -103,9 +107,11 @@ export default function Dashboard() {
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="font-semibold text-slate-900">Low Stock Inventory</h3>
-          <span className="text-xs font-medium px-2 py-1 bg-amber-100 text-amber-700 rounded-full">
-            Action Needed
-          </span>
+          {lowStockItems.length > 0 && (
+            <span className="text-xs font-medium px-2 py-1 bg-amber-100 text-amber-700 rounded-full">
+              Action Needed
+            </span>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
@@ -121,7 +127,7 @@ export default function Dashboard() {
               {lowStockItems.length === 0 ? (
                 <tr>
                   <td colSpan="4" className="px-6 py-8 text-center text-slate-400">
-                    All stock levels are healthy!
+                    All active stock levels are healthy!
                   </td>
                 </tr>
               ) : (

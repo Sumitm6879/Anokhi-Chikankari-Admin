@@ -5,6 +5,7 @@ import ProtectedRoute from '../components/auth/ProtectedRoute';
 import AddProduct from '../pages/AddProduct';
 import Layout from '../components/layout/Layout';
 import Products from '../pages/Products';
+import EditProduct from '../pages/EditProduct';
 
 export default function AppRoutes() {
   return (
@@ -18,6 +19,7 @@ export default function AppRoutes() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/add-product" element={<AddProduct />}/>
           <Route path="/products" element={<Products />} />
+          <Route path="/edit-product/:id" element={<EditProduct />} />
         </Route>
       </Route>
 
