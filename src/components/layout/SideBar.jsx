@@ -8,7 +8,11 @@ import {
   Users,
   LogOut,
   PlusCircle,
-  X // Added Close Icon
+  X,
+  Tags,
+  Percent,
+  ShoppingCart,
+  Settings,
 } from 'lucide-react';
 
 export default function SideBar({ isOpen, onClose }) {
@@ -18,9 +22,13 @@ export default function SideBar({ isOpen, onClose }) {
 
   const navItems = [
     { name: 'Overview', path: '/', icon: LayoutDashboard },
+    { name: 'New Order', path: '/orders/create', icon: ShoppingCart },
     { name: 'Products', path: '/products', icon: Package },
-    { name: 'Orders', path: '/orders', icon: ShoppingBag },
+    { name: 'Sales & Offers', path: '/sales', icon: Percent },
+    { name: 'Order Management', path: '/orders', icon: ShoppingBag },
     { name: 'Customers', path: '/customers', icon: Users },
+    { name: 'Attributes', path: '/attributes', icon: Tags },
+    { name: 'Store Settings', path: '/settings', icon: Settings },
   ];
 
   return (
@@ -42,27 +50,30 @@ export default function SideBar({ isOpen, onClose }) {
           ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
         `}
       >
-        {/* 1. Logo Section */}
+        {/* Logo Section */}
         <div className="p-6 border-b border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-xl">A</span>
-            </div>
+            {/* NEW LOGO IMPLEMENTATION */}
+            <img
+              src="/logo.svg"
+              alt="Logo"
+              className="w-8 h-8 object-contain"
+            />
             <span className="font-semibold text-slate-900 text-lg tracking-tight">AC Admin</span>
           </div>
-          {/* Mobile Close Button */}
           <button onClick={onClose} className="md:hidden text-slate-400 hover:text-slate-600">
             <X size={24} />
           </button>
         </div>
 
-        {/* 2. Navigation Links */}
+        {/* Navigation Links */}
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
-              onClick={() => onClose()} // Close sidebar on click (mobile UX)
+              end={item.path === '/' || item.path === '/orders'}
+              onClick={() => onClose()}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group ${isActive
                   ? 'bg-slate-900 text-white shadow-md shadow-slate-900/10'
@@ -75,7 +86,7 @@ export default function SideBar({ isOpen, onClose }) {
             </NavLink>
           ))}
 
-          {/* Separator */}
+          {/* Separator for "Add Product" */}
           <div className="pt-4 mt-4 border-t border-slate-100">
             <NavLink
               to="/add-product"
@@ -93,7 +104,7 @@ export default function SideBar({ isOpen, onClose }) {
           </div>
         </nav>
 
-        {/* 3. User Profile & Logout */}
+        {/* User Profile & Logout */}
         <div className="p-4 border-t border-slate-100">
           <button
             onClick={handleLogout}

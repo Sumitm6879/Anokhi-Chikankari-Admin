@@ -13,7 +13,12 @@ import {
   Archive,
   X,
   ArrowUpDown,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Tag,
+  Globe,
+  DollarSign,
+  TrendingUp,
+  AlertCircle
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 
@@ -30,10 +35,10 @@ export default function Products() {
     category: '',
     fabric: '',
     design: '',
-    minPrice: '',
-    maxPrice: ''
+    tag: '', // New Filter
+    status: '' // New Filter: 'active', 'archived', 'on_sale'
   });
-  const [sortConfig, setSortConfig] = useState('newest'); // newest, price_asc, price_desc, stock_asc, stock_desc
+  const [sortConfig, setSortConfig] = useState('newest');
 
   // Fetch Data
   useEffect(() => {
@@ -42,8 +47,6 @@ export default function Products() {
 
   const fetchProducts = async () => {
     try {
-      // NOTE: Added fabric and design relations.
-      // If these are text columns on the products table, remove the :fabrics(name) part.
       const { data, error } = await supabase
         .from('products')
         .select(`
@@ -51,6 +54,10 @@ export default function Products() {
           category:categories(name),
           fabric:fabrics(name),
           design:designs(name),
+          costs:product_costs(cost_price),
+          product_tags(
+            tag:tags(name)
+          ),
           variants:product_variants(
             id,
             color_id,
@@ -63,7 +70,15 @@ export default function Products() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setProducts(data || []);
+
+      // Flatten tags for easier usage
+      const cleanedData = (data || []).map(p => ({
+        ...p,
+        tagsList: p.product_tags?.map(pt => pt.tag?.name).filter(Boolean) || [],
+        cost_price: p.costs?.[0]?.cost_price || 0 // Handle array return from join
+      }));
+
+      setProducts(cleanedData);
     } catch (error) {
       toast.error('Error loading products');
       console.error(error);
@@ -77,123 +92,84 @@ export default function Products() {
     return product.variants?.reduce((sum, v) => sum + v.stock_quantity, 0) || 0;
   };
 
+  // Helper: Calculate Margin
+  const getMargin = (price, cost) => {
+    if (!cost || !price) return null;
+    const profit = price - cost;
+    const margin = (profit / price) * 100;
+    return { profit, margin: margin.toFixed(1) };
+  };
+
   // Helper: Toggle Status
   const toggleStatus = async (id, currentStatus) => {
     try {
-      const { error } = await supabase
-        .from('products')
-        .update({ is_active: !currentStatus })
-        .eq('id', id);
-
+      const { error } = await supabase.from('products').update({ is_active: !currentStatus }).eq('id', id);
       if (error) throw error;
-
-      setProducts(prev => prev.map(p =>
-        p.id === id ? { ...p, is_active: !currentStatus } : p
-      ));
+      setProducts(prev => prev.map(p => p.id === id ? { ...p, is_active: !currentStatus } : p));
       toast.success(currentStatus ? 'Product hidden' : 'Product published');
-    } catch (error) {
-      toast.error('Could not update status');
-    }
+    } catch (error) { toast.error('Could not update status'); }
   };
 
   // Helper: Archive
   const handleArchive = async (id, name) => {
-    if (!window.confirm(`Are you sure you want to archive "${name}"? \n\nThis will:\n1. Set stock to 0\n2. Hide product from site`)) return;
-
+    if (!window.confirm(`Archive "${name}"? Stock will be reset to 0.`)) return;
     try {
-      const { error: pError } = await supabase
-        .from('products')
-        .update({ is_active: false })
-        .eq('id', id);
-      if (pError) throw pError;
-
-      const { error: vError } = await supabase
-        .from('product_variants')
-        .update({ stock_quantity: 0 })
-        .eq('product_id', id);
-      if (vError) throw vError;
-
-      setProducts(prev => prev.map(p => {
-        if (p.id === id) {
-          return {
-            ...p,
-            is_active: false,
-            variants: p.variants.map(v => ({ ...v, stock_quantity: 0 }))
-          };
-        }
-        return p;
-      }));
-      toast.success("Product archived and stock reset.");
-    } catch (error) {
-      toast.error("Error archiving product");
-      console.error(error);
-    }
-  };
-
-  const toggleRow = (id) => {
-    setExpandedProductId(expandedProductId === id ? null : id);
+      await supabase.from('products').update({ is_active: false }).eq('id', id);
+      await supabase.from('product_variants').update({ stock_quantity: 0 }).eq('product_id', id);
+      setProducts(prev => prev.map(p => p.id === id ? { ...p, is_active: false, variants: p.variants.map(v => ({ ...v, stock_quantity: 0 })) } : p));
+      toast.success("Archived");
+    } catch (error) { toast.error("Error archiving"); }
   };
 
   // --- DERIVED DATA & FILTER LOGIC ---
-
-  // Get unique options for dropdowns based on current data
   const options = useMemo(() => {
-    const getOptions = (key, nestedKey) => {
-        return [...new Set(products.map(p => {
-            if(nestedKey && p[key]) return p[key][nestedKey];
-            return p[key];
-        }).filter(Boolean))].sort();
-    };
+    const getOptions = (key, nestedKey) => [...new Set(products.map(p => nestedKey ? p[key]?.[nestedKey] : p[key]).filter(Boolean))].sort();
+    const allTags = [...new Set(products.flatMap(p => p.tagsList))].sort();
 
     return {
         categories: getOptions('category', 'name'),
-        fabrics: getOptions('fabric', 'name'), // Assumes fabric is an object with name, or change logic if string
-        designs: getOptions('design', 'name')
+        fabrics: getOptions('fabric', 'name'),
+        designs: getOptions('design', 'name'),
+        tags: allTags
     };
   }, [products]);
 
-  // Filter and Sort Products
   const processedProducts = useMemo(() => {
     let result = products.filter(p => {
-      // 1. Text Search
-      const matchesSearch =
-        p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.category?.name?.toLowerCase().includes(searchTerm.toLowerCase());
+      // Search
+      const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            p.category?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            p.tagsList.some(t => t.toLowerCase().includes(searchTerm.toLowerCase()));
 
-      // 2. Dropdown Filters
+      // Filters
       const matchesCategory = !filters.category || p.category?.name === filters.category;
+      const matchesFabric = !filters.fabric || (p.fabric?.name || p.fabric) === filters.fabric;
+      const matchesDesign = !filters.design || (p.design?.name || p.design) === filters.design;
+      const matchesTag = !filters.tag || p.tagsList.includes(filters.tag);
 
-      // Handle cases where fabric/design might be strings or objects
-      const pFabric = p.fabric?.name || p.fabric;
-      const matchesFabric = !filters.fabric || pFabric === filters.fabric;
+      let matchesStatus = true;
+      if (filters.status === 'active') matchesStatus = p.is_active;
+      if (filters.status === 'archived') matchesStatus = !p.is_active;
+      if (filters.status === 'on_sale') matchesStatus = p.is_on_sale;
 
-      const pDesign = p.design?.name || p.design;
-      const matchesDesign = !filters.design || pDesign === filters.design;
-
-      // 3. Price Range
-      const matchesMinPrice = !filters.minPrice || p.price >= Number(filters.minPrice);
-      const matchesMaxPrice = !filters.maxPrice || p.price <= Number(filters.maxPrice);
-
-      return matchesSearch && matchesCategory && matchesFabric && matchesDesign && matchesMinPrice && matchesMaxPrice;
+      return matchesSearch && matchesCategory && matchesFabric && matchesDesign && matchesTag && matchesStatus;
     });
 
-    // 4. Sorting
+    // Sort
     result.sort((a, b) => {
         switch (sortConfig) {
-            case 'price_asc': return a.price - b.price;
-            case 'price_desc': return b.price - a.price;
+            case 'price_asc': return (a.is_on_sale ? a.sale_price : a.price) - (b.is_on_sale ? b.sale_price : b.price);
+            case 'price_desc': return (b.is_on_sale ? b.sale_price : b.price) - (a.is_on_sale ? a.sale_price : a.price);
             case 'stock_asc': return getTotalStock(a) - getTotalStock(b);
             case 'stock_desc': return getTotalStock(b) - getTotalStock(a);
-            case 'newest':
-            default: return new Date(b.created_at) - new Date(a.created_at);
+            case 'newest': default: return new Date(b.created_at) - new Date(a.created_at);
         }
     });
-
     return result;
   }, [products, searchTerm, filters, sortConfig]);
 
   const clearFilters = () => {
-    setFilters({ category: '', fabric: '', design: '', minPrice: '', maxPrice: '' });
+    setFilters({ category: '', fabric: '', design: '', tag: '', status: '' });
     setSearchTerm('');
     setSortConfig('newest');
   };
@@ -202,343 +178,252 @@ export default function Products() {
     <div className="space-y-6 mb-20">
       <Toaster position="top-right" richColors />
 
-      {/* Header */}
+      {/* Header & Controls */}
       <div className="flex flex-col gap-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-            <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
-            <p className="text-slate-500">Manage your catalog, filter options, and stock.</p>
+              <h1 className="text-2xl font-bold text-slate-900">Inventory</h1>
+              <p className="text-slate-500">Manage catalog, pricing, and stock levels.</p>
             </div>
 
-            {/* Primary Actions */}
             <div className="flex flex-wrap items-center gap-3">
                 <div className="relative grow md:grow-0">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                    <input
-                        type="text"
-                        placeholder="Search products..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 w-full md:w-64"
-                    />
+                    <input type="text" placeholder="Search products, tags..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm w-full md:w-64" />
                 </div>
 
-                <button
-                    onClick={() => setShowFilters(!showFilters)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                        showFilters || Object.values(filters).some(Boolean)
-                        ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
-                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
-                >
-                    {showFilters ? <X size={18} /> : <Filter size={18} />}
-                    <span>Filters</span>
-                    {Object.values(filters).some(Boolean) && (
-                        <span className="w-2 h-2 rounded-full bg-indigo-600 ml-1"></span>
-                    )}
+                <button onClick={() => setShowFilters(!showFilters)} className={`flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${showFilters || Object.values(filters).some(Boolean) ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                    {showFilters ? <X size={18} /> : <Filter size={18} />} Filters
                 </button>
 
                 <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                        <ArrowUpDown size={16} />
-                    </div>
-                    <select
-                        value={sortConfig}
-                        onChange={(e) => setSortConfig(e.target.value)}
-                        className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 appearance-none cursor-pointer hover:bg-slate-50"
-                    >
+                    <select value={sortConfig} onChange={(e) => setSortConfig(e.target.value)} className="pl-3 pr-8 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-600 appearance-none cursor-pointer hover:bg-slate-50">
                         <option value="newest">Newest First</option>
                         <option value="price_asc">Price: Low to High</option>
                         <option value="price_desc">Price: High to Low</option>
                         <option value="stock_desc">Stock: High to Low</option>
-                        <option value="stock_asc">Stock: Low to High</option>
                     </select>
                 </div>
             </div>
         </div>
 
-        {/* Expandable Filter Panel */}
+        {/* Filters Panel */}
         {showFilters && (
-            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm animate-in slide-in-from-top-2 duration-200">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
-                        <SlidersHorizontal size={16} />
-                        Active Filters
-                    </h3>
-                    <button
-                        onClick={clearFilters}
-                        className="text-xs text-indigo-600 hover:text-indigo-800 font-medium hover:underline"
-                    >
-                        Clear All
-                    </button>
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm animate-in slide-in-from-top-2">
+                <div className="flex justify-between mb-4">
+                    <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-2"><SlidersHorizontal size={16} /> Active Filters</h3>
+                    <button onClick={clearFilters} className="text-xs text-indigo-600 hover:underline">Clear All</button>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                    {/* Category Filter */}
-                    <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-slate-500">Category</label>
-                        <div className="relative">
-                            <select
-                                value={filters.category}
-                                onChange={(e) => setFilters({...filters, category: e.target.value})}
-                                className="w-full pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 appearance-none"
-                            >
-                                <option value="">All Categories</option>
-                                {options.categories.map(c => <option key={c} value={c}>{c}</option>)}
-                            </select>
-                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                        </div>
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                    {/* Category */}
+                    <div>
+                        <label className="text-xs font-medium text-slate-500 block mb-1">Category</label>
+                        <select value={filters.category} onChange={(e) => setFilters({...filters, category: e.target.value})} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+                            <option value="">All</option>
+                            {options.categories.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
                     </div>
-
-                    {/* Fabric Filter */}
-                    <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-slate-500">Fabric</label>
-                        <div className="relative">
-                            <select
-                                value={filters.fabric}
-                                onChange={(e) => setFilters({...filters, fabric: e.target.value})}
-                                className="w-full pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 appearance-none"
-                            >
-                                <option value="">All Fabrics</option>
-                                {options.fabrics.map(f => <option key={f} value={f}>{f}</option>)}
-                            </select>
-                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                        </div>
+                    {/* Status */}
+                    <div>
+                        <label className="text-xs font-medium text-slate-500 block mb-1">Status</label>
+                        <select value={filters.status} onChange={(e) => setFilters({...filters, status: e.target.value})} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+                            <option value="">All Statuses</option>
+                            <option value="active">Active</option>
+                            <option value="on_sale">On Sale</option>
+                            <option value="archived">Archived</option>
+                        </select>
                     </div>
-
-                    {/* Design Filter */}
-                    <div className="space-y-1.5">
-                        <label className="text-xs font-medium text-slate-500">Design</label>
-                        <div className="relative">
-                            <select
-                                value={filters.design}
-                                onChange={(e) => setFilters({...filters, design: e.target.value})}
-                                className="w-full pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 appearance-none"
-                            >
-                                <option value="">All Designs</option>
-                                {options.designs.map(d => <option key={d} value={d}>{d}</option>)}
-                            </select>
-                            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                        </div>
+                    {/* Tags */}
+                    <div>
+                        <label className="text-xs font-medium text-slate-500 block mb-1">Tags</label>
+                        <select value={filters.tag} onChange={(e) => setFilters({...filters, tag: e.target.value})} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+                            <option value="">All Tags</option>
+                            {options.tags.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
                     </div>
-
-                    {/* Price Range */}
-                    <div className="lg:col-span-2 space-y-1.5">
-                        <label className="text-xs font-medium text-slate-500">Price Range (₹)</label>
-                        <div className="flex gap-2">
-                            <input
-                                type="number"
-                                placeholder="Min"
-                                value={filters.minPrice}
-                                onChange={(e) => setFilters({...filters, minPrice: e.target.value})}
-                                className="w-full pl-3 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                            />
-                            <span className="self-center text-slate-400">-</span>
-                            <input
-                                type="number"
-                                placeholder="Max"
-                                value={filters.maxPrice}
-                                onChange={(e) => setFilters({...filters, maxPrice: e.target.value})}
-                                className="w-full pl-3 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-                            />
-                        </div>
+                     {/* Fabric */}
+                     <div>
+                        <label className="text-xs font-medium text-slate-500 block mb-1">Fabric</label>
+                        <select value={filters.fabric} onChange={(e) => setFilters({...filters, fabric: e.target.value})} className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+                            <option value="">All</option>
+                            {options.fabrics.map(f => <option key={f} value={f}>{f}</option>)}
+                        </select>
                     </div>
                 </div>
             </div>
         )}
       </div>
 
-      {/* Products Table */}
+      {/* Table */}
       <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-200">
               <tr>
                 <th className="px-6 py-4">Product</th>
-                <th className="px-6 py-4">Category</th>
-                <th className="px-6 py-4">Price</th>
-                <th className="px-6 py-4 text-center">Status</th>
+                <th className="px-6 py-4">Pricing</th>
+                <th className="px-6 py-4">Category / Tags</th>
                 <th className="px-6 py-4 text-center">Stock</th>
+                <th className="px-6 py-4 text-center">Status</th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan="6" className="p-8 text-center text-slate-500">Loading inventory...</td></tr>
+                <tr><td colSpan="6" className="p-8 text-center text-slate-500">Loading...</td></tr>
               ) : processedProducts.length === 0 ? (
-                <tr>
-                    <td colSpan="6" className="p-12 text-center text-slate-500">
-                        <div className="flex flex-col items-center justify-center gap-2">
-                            <Package size={32} className="text-slate-300" />
-                            <p>No products match your filters.</p>
-                            <button onClick={clearFilters} className="text-indigo-600 font-medium hover:underline">Clear all filters</button>
-                        </div>
-                    </td>
-                </tr>
+                <tr><td colSpan="6" className="p-12 text-center text-slate-500">No products found.</td></tr>
               ) : (
                 processedProducts.map((product) => (
                   <React.Fragment key={product.id}>
-                    {/* Main Row */}
-                    <tr className={`hover:bg-slate-50/50 transition-colors group ${!product.is_active ? 'bg-slate-50/80 grayscale opacity-75' : ''}`}>
+                    <tr className={`hover:bg-slate-50/50 transition-colors ${!product.is_active ? 'opacity-60 bg-slate-50' : ''}`}>
+
+                      {/* 1. Product Name & Image */}
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-4">
                           <div className="w-12 h-12 bg-slate-100 rounded-lg border border-slate-200 overflow-hidden shrink-0">
                             {product.images?.find(img => img.is_primary)?.image_url ? (
-                              <img
-                                src={product.images.find(img => img.is_primary).image_url}
-                                alt=""
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-slate-400">
-                                <Package size={20} />
-                              </div>
-                            )}
+                              <img src={product.images.find(img => img.is_primary).image_url} className="w-full h-full object-cover" />
+                            ) : <div className="w-full h-full flex items-center justify-center text-slate-300"><Package size={20} /></div>}
                           </div>
                           <div>
                             <div className="font-medium text-slate-900">{product.name}</div>
-                            <div className="text-xs text-slate-400 flex gap-2">
-                                <span>SKU: {product.id.slice(0, 8)}...</span>
-                                {/* Display Fabric/Design if available */}
-                                {(product.fabric?.name || product.fabric) && (
-                                    <span className="hidden sm:inline">• {product.fabric.name || product.fabric}</span>
-                                )}
-                            </div>
+                            <div className="text-[10px] text-slate-400">SKU: {product.id.slice(0,6)}...</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-slate-600">
-                        <span className="bg-slate-100 px-2 py-1 rounded text-xs font-medium border border-slate-200">
-                          {product.category?.name || 'Uncategorized'}
-                        </span>
+
+                      {/* 2. Pricing (Smart Display) */}
+                      <td className="px-6 py-4">
+                        {product.is_on_sale ? (
+                            <div>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-bold text-emerald-600">₹{product.sale_price}</span>
+                                    <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">SALE</span>
+                                </div>
+                                <span className="text-xs text-slate-400 line-through">₹{product.price}</span>
+                            </div>
+                        ) : (
+                            <span className="font-medium text-slate-900">₹{product.price}</span>
+                        )}
                       </td>
-                      <td className="px-6 py-4 font-medium text-slate-900">
-                        ₹{product.price}
+
+                      {/* 3. Category & Tags */}
+                      <td className="px-6 py-4">
+                        <div className="text-slate-600 font-medium mb-1">{product.category?.name}</div>
+                        <div className="flex flex-wrap gap-1">
+                            {product.tagsList.slice(0, 3).map(t => (
+                                <span key={t} className="text-[10px] px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded border border-slate-200">{t}</span>
+                            ))}
+                            {product.tagsList.length > 3 && <span className="text-[10px] text-slate-400">+{product.tagsList.length - 3}</span>}
+                        </div>
                       </td>
+
+                      {/* 4. Stock */}
                       <td className="px-6 py-4 text-center">
-                        <button
-                          onClick={() => toggleStatus(product.id, product.is_active)}
-                          className={`p-1.5 rounded-full transition-colors ${
-                            product.is_active
-                              ? 'bg-emerald-100 text-emerald-600 hover:bg-emerald-200'
-                              : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
-                          }`}
-                        >
-                          {product.is_active ? <Eye size={16} /> : <EyeOff size={16} />}
-                        </button>
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                         <button
-                           onClick={() => toggleRow(product.id)}
-                           className={`flex items-center justify-center gap-2 mx-auto px-3 py-1.5 rounded-lg border transition-all text-xs font-medium ${
-                             expandedProductId === product.id
-                               ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
-                               : 'bg-white border-slate-200 text-slate-600 hover:border-indigo-300'
-                           }`}
-                         >
-                           <span>
-                             {getTotalStock(product)} Units
-                           </span>
-                           {expandedProductId === product.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                         <button onClick={() => setExpandedProductId(expandedProductId === product.id ? null : product.id)} className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-all ${expandedProductId === product.id ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600'}`}>
+                           {getTotalStock(product)} <ChevronDown size={12} className={`transition-transform ${expandedProductId === product.id ? 'rotate-180' : ''}`} />
                          </button>
                       </td>
+
+                      {/* 5. Status Toggle */}
+                      <td className="px-6 py-4 text-center">
+                        <button onClick={() => toggleStatus(product.id, product.is_active)} title={product.is_active ? "Hide Product" : "Publish Product"}>
+                            {product.is_active
+                                ? <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-md hover:bg-emerald-100"><Eye size={18}/></div>
+                                : <div className="p-1.5 bg-slate-100 text-slate-400 rounded-md hover:bg-slate-200"><EyeOff size={18}/></div>
+                            }
+                        </button>
+                      </td>
+
+                      {/* 6. Actions */}
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button
-                            onClick={() => navigate(`/edit-product/${product.id}`)}
-                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                            title="Edit Product"
-                          >
-                            <Edit2 size={18} />
-                          </button>
-
-                          <button
-                            onClick={() => handleArchive(product.id, product.name)}
-                            className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
-                            title="Archive (Zero Stock)"
-                          >
-                            <Archive size={18} />
-                          </button>
+                          <button onClick={() => navigate(`/edit-product/${product.id}`)} className="p-2 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 rounded-lg"><Edit2 size={18} /></button>
+                          <button onClick={() => handleArchive(product.id, product.name)} className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-lg"><Archive size={18} /></button>
                         </div>
                       </td>
                     </tr>
 
-                    {/* Expanded Matrix Row */}
+                    {/* --- EXPANDED DETAILS PANEL --- */}
                     {expandedProductId === product.id && (
                       <tr className="bg-slate-50/50">
-                        <td colSpan="6" className="p-0">
-                          <div className="p-6 border-y border-slate-100 shadow-inner bg-slate-50">
-                            <div className="flex justify-between items-start mb-4">
-                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Stock Distribution Matrix</h4>
-                                <div className="text-xs text-slate-500">
-                                    {(product.design?.name || product.design) && `Design: ${product.design.name || product.design} • `}
-                                    {(product.fabric?.name || product.fabric) && `Fabric: ${product.fabric.name || product.fabric}`}
+                        <td colSpan="6" className="p-0 border-b border-slate-100 shadow-inner">
+                          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6">
+
+                            {/* COL 1: STOCK MATRIX */}
+                            <div className="lg:col-span-2 space-y-4">
+                                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2"><Package size={14}/> Stock Distribution</h4>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    {Object.values(product.variants.reduce((acc, v) => {
+                                        const k = v.color_id || 'unk';
+                                        if(!acc[k]) acc[k] = { ...v, items: [] };
+                                        acc[k].items.push(v);
+                                        return acc;
+                                    }, {})).map(group => (
+                                        <div key={group.color_id} className="bg-white border border-slate-200 p-3 rounded-lg flex items-start gap-3">
+                                            <div className="w-3 h-3 rounded-full border border-slate-200 mt-1" style={{backgroundColor: group.color?.hex_code}}></div>
+                                            <div className="flex-1">
+                                                <div className="text-sm font-semibold text-slate-900 mb-2">{group.color?.name}</div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {group.items.sort((a,b)=>a.size.name.localeCompare(b.size.name)).map(v => (
+                                                        <div key={v.id} className="text-center bg-slate-50 border border-slate-100 rounded px-2 py-1 min-w-12">
+                                                            <div className="text-[10px] text-slate-400 font-bold">{v.size.name}</div>
+                                                            <div className={`text-xs font-medium ${v.stock_quantity < 5 ? 'text-amber-600' : 'text-slate-700'}`}>{v.stock_quantity}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                              {Object.values(
-                                product.variants.reduce((acc, variant) => {
-                                  const key = variant.color_id || 'unknown';
-                                  if (!acc[key]) acc[key] = { color: variant.color, id: variant.color_id, items: [] };
-                                  acc[key].items.push(variant);
-                                  return acc;
-                                }, {})
-                              ).map((group, idx) => {
-                                const variantImages = product.images.filter(img => img.color_id === group.id);
-
-                                return (
-                                  <div key={idx} className="bg-white border border-slate-200 rounded-xl p-4 flex gap-4">
-                                    <div className="w-20 shrink-0 flex flex-col gap-2">
-                                        {variantImages.length > 0 ? (
-                                            <div className="flex flex-col gap-2 h-28 overflow-y-auto pr-1 custom-scrollbar">
-                                                {variantImages.map((img, i) => (
-                                                    <img
-                                                        key={i}
-                                                        src={img.image_url}
-                                                        className="w-full aspect-3/4 object-cover rounded-md border border-slate-100"
-                                                        alt=""
-                                                    />
-                                                ))}
-                                            </div>
-                                        ) : (
-                                            <div className="w-full h-24 bg-slate-50 rounded-md border border-slate-200 flex items-center justify-center text-slate-300">
-                                                <Package size={16}/>
-                                            </div>
-                                        )}
-                                        <div className="text-[10px] text-center text-slate-400">{variantImages.length} photos</div>
+                            {/* COL 2: FINANCIALS & SEO */}
+                            <div className="space-y-6 border-l border-slate-200 pl-6 border-t lg:border-t-0 pt-6 lg:pt-0">
+                                {/* Financials */}
+                                <div>
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2"><DollarSign size={14}/> Financials</h4>
+                                    <div className="bg-white border border-slate-200 rounded-lg p-3 space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Selling Price:</span>
+                                            <span className="font-medium text-slate-900">₹{product.is_on_sale ? product.sale_price : product.price}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-slate-500">Cost Price:</span>
+                                            <span className="font-medium text-slate-900">₹{product.cost_price || '0.00'}</span>
+                                        </div>
+                                        <div className="pt-2 border-t border-slate-100 flex justify-between items-center">
+                                            <span className="text-slate-500 text-xs uppercase font-bold">Margin</span>
+                                            {product.cost_price > 0 ? (
+                                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${getMargin(product.is_on_sale ? product.sale_price : product.price, product.cost_price)?.margin > 50 ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                                    {getMargin(product.is_on_sale ? product.sale_price : product.price, product.cost_price)?.margin}%
+                                                </span>
+                                            ) : <span className="text-xs text-slate-300">N/A</span>}
+                                        </div>
                                     </div>
+                                </div>
 
-                                    <div className="flex-1">
-                                      <div className="flex items-center gap-2 mb-3">
-                                        <div
-                                          className="w-3 h-3 rounded-full border border-slate-300"
-                                          style={{ backgroundColor: group.color?.hex_code }}
-                                        ></div>
-                                        <span className="font-semibold text-slate-900 text-sm">{group.color?.name}</span>
-                                      </div>
-
-                                      <div className="grid grid-cols-3 gap-2">
-                                        {group.items.sort((a,b) => a.size.name.localeCompare(b.size.name)).map(v => (
-                                          <div key={v.id} className="text-center">
-                                            <div className="text-[10px] text-slate-400 font-medium mb-0.5">{v.size?.name}</div>
-                                            <div className={`text-xs font-bold py-1 px-1 rounded border ${
-                                              v.stock_quantity === 0
-                                                ? 'bg-red-50 text-red-600 border-red-100'
-                                                : v.stock_quantity < 5
-                                                  ? 'bg-amber-50 text-amber-600 border-amber-100'
-                                                  : 'bg-slate-50 text-slate-700 border-slate-100'
-                                            }`}>
-                                              {v.stock_quantity}
+                                {/* SEO Metadata */}
+                                <div>
+                                    <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-2"><Globe size={14}/> SEO Details</h4>
+                                    <div className="text-xs space-y-2">
+                                        <div>
+                                            <span className="block text-slate-400">Meta Title</span>
+                                            <span className="text-slate-700 font-medium">{product.meta_title || '-'}</span>
+                                        </div>
+                                        <div>
+                                            <span className="block text-slate-400">Keywords</span>
+                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                {product.keywords?.map((k, i) => (
+                                                    <span key={i} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px]">{k}</span>
+                                                )) || '-'}
                                             </div>
-                                          </div>
-                                        ))}
-                                      </div>
+                                        </div>
                                     </div>
-                                  </div>
-                                );
-                              })}
+                                </div>
                             </div>
+
                           </div>
                         </td>
                       </tr>

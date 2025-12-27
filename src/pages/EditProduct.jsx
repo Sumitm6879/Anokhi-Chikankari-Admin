@@ -7,12 +7,13 @@ import {
   Save,
   Image as ImageIcon,
   Loader2,
-  ArrowLeft,
   Trash2,
-  AlertCircle,
-  Check,
   PackageOpen,
-  Search
+  Search,
+  DollarSign,
+  Globe,
+  X,
+  Check
 } from 'lucide-react';
 
 export default function EditProduct() {
@@ -23,230 +24,291 @@ export default function EditProduct() {
 
   // 1. Metadata State
   const [meta, setMeta] = useState({
-    categories: [], fabrics: [], designs: [], colors: [], sizes: []
+    categories: [], fabrics: [], designs: [], colors: [], sizes: [], tags: []
   });
 
-  // 2. Local State
+  // 2. Local State for UI
   const [selectedColorIds, setSelectedColorIds] = useState([]);
+  const [selectedTagIds, setSelectedTagIds] = useState([]);
   const [colorImages, setColorImages] = useState({});
   const [colorSearch, setColorSearch] = useState('');
 
-  // 3. Form Setup
+  // 3. Form Setup (Added getValues to help with manual SKU check)
   const { register, handleSubmit, setValue, reset, watch, getValues, formState: { dirtyFields } } = useForm();
-  const watchedName = watch('name');
 
-  // 4. LOAD DATA (Metadata + Product)
+  // --- NEW: Handle Stock Changes & Auto-SKU ---
+  const handleStockChange = (colorId, size, qty) => {
+    // 1. If stock is less than 1 or empty, do nothing
+    if (!qty || parseInt(qty) < 1) return;
+
+    // 2. Check if SKU is already there (We don't overwrite existing SKUs)
+    const skuFieldName = `variants.${colorId}.${size.id}.sku`;
+    const currentSku = getValues(skuFieldName);
+    if (currentSku) return;
+
+    // 3. Generate SKU only if valid
+    const productName = getValues('name') || '';
+    const slug = productName.toLowerCase().trim().replace(/ /g, '-').replace(/[^\w-]+/g, '');
+    const color = meta.colors.find(c => c.id === colorId);
+
+    if (slug && color) {
+         const colorName = color.name.toLowerCase().replace(/ /g, '-');
+         const sizeName = size.name.toLowerCase();
+         // SET THE SKU
+         setValue(skuFieldName, `${slug}-${colorName}-${sizeName}`);
+    }
+  };
+
+  // 4. LOAD DATA
   useEffect(() => {
     const loadAllData = async () => {
       try {
-        // A. Fetch Metadata
-        const [cats, fabs, des, cols, siz] = await Promise.all([
+        // A. Metadata
+        const [cats, fabs, des, cols, siz, tags] = await Promise.all([
           supabase.from('categories').select('*'),
           supabase.from('fabrics').select('*'),
           supabase.from('designs').select('*'),
           supabase.from('colors').select('*'),
           supabase.from('sizes').select('*').order('name'),
+          supabase.from('tags').select('*').order('name'),
         ]);
 
         setMeta({
           categories: cats.data || [], fabrics: fabs.data || [],
-          designs: des.data || [], colors: cols.data || [], sizes: siz.data || []
+          designs: des.data || [], colors: cols.data || [], sizes: siz.data || [],
+          tags: tags.data || []
         });
 
         // B. Fetch Product
         const { data: product, error } = await supabase
           .from('products')
-          .select(`*, variants:product_variants(*), images:product_images(*)`)
+          .select(`
+            *,
+            costs:product_costs(cost_price),
+            p_tags:product_tags(tag_id),
+            variants:product_variants(*),
+            images:product_images(*)
+          `)
           .eq('id', id)
           .single();
 
         if (error) throw error;
+        if (!product) throw new Error("Product not found");
 
         // C. Populate Form
         reset({
           name: product.name,
-          price: product.price,
           description: product.description,
           category_id: product.category_id,
           fabric_id: product.fabric_id,
           design_id: product.design_id,
+          price: product.price,
+          sale_price: product.sale_price,
+          cost_price: product.costs?.[0]?.cost_price || '',
+          is_on_sale: product.is_on_sale,
+          meta_title: product.meta_title,
+          meta_description: product.meta_description,
+          keywords: product.keywords ? product.keywords.join(', ') : ''
         });
 
-        // D. Reconstruct State (Colors & Images)
+        // D. Populate Tags
+        if (product.p_tags) {
+          setSelectedTagIds(product.p_tags.map(t => t.tag_id));
+        }
+
+        // E. Populate Images & Variants
         const activeColors = new Set();
         const imgMap = {};
 
-        // Process Images
         if (product.images) {
+          product.images.sort((a, b) => (b.is_primary === a.is_primary) ? 0 : b.is_primary ? 1 : -1);
           product.images.forEach(img => {
             if (img.color_id) {
               activeColors.add(img.color_id);
               if (!imgMap[img.color_id]) imgMap[img.color_id] = [];
-              if (!imgMap[img.color_id].includes(img.image_url)) {
-                 imgMap[img.color_id].push(img.image_url);
-              }
+              imgMap[img.color_id].push(img.image_url);
             }
           });
         }
 
-        // Process Variants (in case a color has stock but no images yet)
-        if (product.variants) {
-          product.variants.forEach(v => activeColors.add(v.color_id));
-        }
-
-        setSelectedColorIds(Array.from(activeColors));
-        setColorImages(imgMap);
-
-        // E. Populate Matrix Inputs
         if (product.variants) {
           product.variants.forEach(v => {
+            activeColors.add(v.color_id);
             setValue(`variants.${v.color_id}.${v.size_id}.stock`, v.stock_quantity);
             setValue(`variants.${v.color_id}.${v.size_id}.sku`, v.sku);
           });
         }
 
+        setSelectedColorIds(Array.from(activeColors));
+        setColorImages(imgMap);
+
       } catch (error) {
-        toast.error("Error loading product details");
+        toast.error("Error loading product");
         console.error(error);
       } finally {
         setFetching(false);
       }
     };
-
     loadAllData();
   }, [id, reset, setValue]);
 
-  // 5. AUTO SKU GENERATOR (Crucial for Edit Mode)
-  useEffect(() => {
-    if (!watchedName) return;
-    const slug = watchedName.toLowerCase().replace(/ /g, '-').replace(/[^\w-]+/g, '');
-
-    selectedColorIds.forEach(colorId => {
-      const colorName = meta.colors.find(c => c.id === colorId)?.name.toLowerCase();
-      if (!colorName) return;
-
-      meta.sizes.forEach(size => {
-        const fieldName = `variants.${colorId}.${size.id}.sku`;
-        const currentSku = getValues(fieldName);
-
-        // Only generate if the field is empty (preserves existing SKUs)
-        if (!currentSku) {
-          setValue(fieldName, `${slug}-${colorName}-${size.name}`);
-        }
-      });
-    });
-  }, [watchedName, selectedColorIds, meta.colors, meta.sizes, setValue, getValues]);
-
-
-  // 6. Cloudinary Widget
+  // 5. HELPER FUNCTIONS
   const openWidget = (colorId) => {
     const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
+    if (!cloudName || !uploadPreset) return toast.error("Missing Cloudinary credentials");
 
-    if (!cloudName || !uploadPreset) {
-      toast.error("Missing Cloudinary credentials");
-      return;
-    }
-
-    const myWidget = window.cloudinary.createUploadWidget(
-      {
-        cloudName, uploadPreset,
-        sources: ['local', 'url'], multiple: true, maxImageFileSize: 10000000,
-        styles: { palette: { window: "#FFFFFF", sourceBg: "#F8FAFC", action: "#4F46E5" } }
-      },
+    window.cloudinary.createUploadWidget(
+      { cloudName, uploadPreset, sources: ['local', 'url'], multiple: true, maxImageFileSize: 10000000 },
       (error, result) => {
         if (!error && result && result.event === "success") {
-          setColorImages(prev => ({
-            ...prev,
-            [colorId]: [...(prev[colorId] || []), result.info.secure_url]
-          }));
+          setColorImages(prev => ({ ...prev, [colorId]: [...(prev[colorId] || []), result.info.secure_url] }));
         }
       }
-    );
-    myWidget.open();
+    ).open();
   };
 
-  // 7. UPDATE LOGIC
+  const toggleColor = (id) => setSelectedColorIds(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
+  const toggleTag = (id) => setSelectedTagIds(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]);
+  const removeImage = (colorId, index) => setColorImages(prev => ({ ...prev, [colorId]: prev[colorId].filter((_, i) => i !== index) }));
+
+  const filteredColors = meta.colors.filter(c => c.name.toLowerCase().includes(colorSearch.toLowerCase()));
+
+  // 6. SUBMIT LOGIC (Final Version)
   const onUpdate = async (formData) => {
     setLoading(true);
     try {
-      if (selectedColorIds.length === 0) throw new Error("Please select at least one color");
+      if (selectedColorIds.length === 0) throw new Error("Select at least one color");
 
-      // A. Update Basic Details
+      const keywordsArray = formData.keywords ? formData.keywords.split(',').map(k => k.trim()).filter(Boolean) : [];
+
+      // --- STEP 0: PRE-VALIDATE SKUs ---
+      const skusToCheck = [];
+      selectedColorIds.forEach(colorId => {
+        meta.sizes.forEach(size => {
+          const sku = formData.variants?.[colorId]?.[size.id]?.sku?.trim();
+          if (sku) skusToCheck.push(sku);
+        });
+      });
+
+      if (skusToCheck.length > 0) {
+        // Check for SKU conflicts with OTHER products
+        const { data: conflicts } = await supabase
+          .from('product_variants')
+          .select('sku, products(name)')
+          .in('sku', skusToCheck)
+          .neq('product_id', id);
+
+        if (conflicts && conflicts.length > 0) {
+          const conflict = conflicts[0];
+          throw new Error(`SKU '${conflict.sku}' is already taken by product "${conflict.products?.name}".`);
+        }
+      }
+
+      // --- STEP A: Update Product ---
       const { error: pError } = await supabase
         .from('products')
         .update({
-          name: formData.name, description: formData.description, price: parseFloat(formData.price),
-          category_id: formData.category_id, fabric_id: formData.fabric_id, design_id: formData.design_id
+          name: formData.name,
+          description: formData.description,
+          price: parseFloat(formData.price),
+          sale_price: formData.sale_price ? parseFloat(formData.sale_price) : null,
+          is_on_sale: formData.is_on_sale,
+          category_id: formData.category_id,
+          fabric_id: formData.fabric_id,
+          design_id: formData.design_id,
+          meta_title: formData.meta_title,
+          meta_description: formData.meta_description,
+          keywords: keywordsArray
         })
         .eq('id', id);
 
       if (pError) throw pError;
 
-      // B. Update Images (Unlink All -> Re-link New)
-      await supabase.from('product_images').delete().eq('product_id', id);
+      // --- STEP B: Update Extras ---
+      if (formData.cost_price) {
+        await supabase.from('product_costs').upsert({ product_id: id, cost_price: parseFloat(formData.cost_price) });
+      }
 
+      await supabase.from('product_tags').delete().eq('product_id', id);
+      if (selectedTagIds.length > 0) {
+        await supabase.from('product_tags').insert(selectedTagIds.map(tid => ({ product_id: id, tag_id: tid })));
+      }
+
+      await supabase.from('product_images').delete().eq('product_id', id);
       const allImages = [];
-      selectedColorIds.forEach((colorId, colorIndex) => {
-        const imagesForColor = colorImages[colorId] || [];
-        imagesForColor.forEach((url, imgIndex) => {
-          allImages.push({
-            product_id: id, color_id: colorId, image_url: url,
-            is_primary: colorIndex === 0 && imgIndex === 0
-          });
+      selectedColorIds.forEach((colorId, idx) => {
+        (colorImages[colorId] || []).forEach((url, i) => {
+          allImages.push({ product_id: id, color_id: colorId, image_url: url, is_primary: idx === 0 && i === 0 });
         });
       });
       if (allImages.length > 0) await supabase.from('product_images').insert(allImages);
 
-      // C. Update Variants (Smart Upsert)
-      const variantsToUpsert = [];
+      // --- STEP C: VARIANTS ---
+
+      // 1. Fetch Fresh IDs
+      const { data: currentDbVariants } = await supabase
+        .from('product_variants')
+        .select('id, color_id, size_id')
+        .eq('product_id', id);
+
+      const dbVariantMap = {};
+      currentDbVariants?.forEach(v => {
+        dbVariantMap[`${v.color_id}-${v.size_id}`] = v.id;
+      });
+
+      // 2. Soft Delete removed variants
+      const variantsToDelete = currentDbVariants
+        ?.filter(v => !selectedColorIds.includes(v.color_id))
+        .map(v => v.id) || [];
+
+      if (variantsToDelete.length > 0) {
+        const { error: deleteError } = await supabase.from('product_variants').delete().in('id', variantsToDelete);
+        if (deleteError) {
+           await supabase.from('product_variants').update({ stock_quantity: 0 }).in('id', variantsToDelete);
+        }
+      }
+
+      // 3. Prepare Batches
+      const updates = [];
+      const inserts = [];
 
       selectedColorIds.forEach(colorId => {
         meta.sizes.forEach(size => {
           const vData = formData.variants?.[colorId]?.[size.id];
-          const qty = vData?.stock !== "" ? parseInt(vData?.stock || 0) : null;
+          // Prevent negative values from form data
+          const rawQty = parseInt(vData?.stock || 0);
+          const qty = rawQty > 0 ? rawQty : 0;
+          const sku = vData?.sku;
 
-          // Fallback SKU Generator (Safety Net)
-          let finalSku = vData?.sku;
-          if (!finalSku) {
-             const colorName = meta.colors.find(c => c.id === colorId)?.name.toLowerCase();
-             const slug = formData.name.toLowerCase().replace(/ /g, '-').replace(/[^\w-]+/g, '');
-             finalSku = `${slug}-${colorName}-${size.name}`;
-          }
+          const existingId = dbVariantMap[`${colorId}-${size.id}`];
 
-          if (qty !== null && !isNaN(qty)) {
-            variantsToUpsert.push({
-              product_id: id,
-              color_id: colorId,
-              size_id: size.id,
-              stock_quantity: qty,
-              sku: finalSku // Use the ensured SKU
-            });
+          const payload = {
+            product_id: id,
+            color_id: colorId,
+            size_id: size.id,
+            stock_quantity: qty,
+            sku: sku
+          };
+
+          if (existingId) {
+            updates.push({ ...payload, id: existingId });
+          } else {
+            inserts.push(payload);
           }
         });
       });
 
-      if (variantsToUpsert.length > 0) {
-        // 1. Delete removed colors
-        const keptColorIds = selectedColorIds;
-        if (keptColorIds.length > 0) {
-             await supabase
-            .from('product_variants')
-            .delete()
-            .eq('product_id', id)
-            .not('color_id', 'in', `(${keptColorIds.join(',')})`);
-        }
+      // 4. Execute
+      if (updates.length > 0) {
+        const { error: updateError } = await supabase.from('product_variants').upsert(updates);
+        if (updateError) throw updateError;
+      }
 
-        // 2. Upsert active variants
-        const { error: vError } = await supabase
-          .from('product_variants')
-          .upsert(variantsToUpsert, {
-            onConflict: 'product_id, color_id, size_id'
-          });
-
-        if (vError) throw vError;
-      } else {
-        await supabase.from('product_variants').delete().eq('product_id', id);
+      if (inserts.length > 0) {
+        // Safe Upsert for inserts
+        const { error: insertError } = await supabase.from('product_variants').upsert(inserts, { onConflict: 'product_id,color_id,size_id' });
+        if (insertError) throw insertError;
       }
 
       toast.success("Product updated successfully!");
@@ -260,210 +322,220 @@ export default function EditProduct() {
     }
   };
 
-  const toggleColor = (id) => {
-    setSelectedColorIds(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
-  };
-
-  const removeImage = (colorId, indexToRemove) => {
-    setColorImages(prev => ({
-      ...prev,
-      [colorId]: prev[colorId].filter((_, i) => i !== indexToRemove)
-    }));
-  };
-
-  const filteredColors = meta.colors.filter(c =>
-    c.name.toLowerCase().includes(colorSearch.toLowerCase())
-  );
-
-  if (fetching) return (
-    <div className="h-screen flex items-center justify-center bg-slate-50">
-      <div className="flex flex-col items-center gap-4">
-        <Loader2 className="animate-spin text-indigo-600" size={32} />
-        <p className="text-slate-500 font-medium">Loading product data...</p>
-      </div>
-    </div>
-  );
+  if (fetching) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-slate-400" /></div>;
 
   return (
     <div className="max-w-6xl mx-auto pb-32 pt-6 px-6">
       <Toaster position="top-right" richColors />
-
-      {/* Header */}
-      <div className="flex items-center justify-between mb-10">
-        <div className="flex items-center gap-4">
-          <button type="button" onClick={() => navigate(-1)} className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-500 hover:text-slate-800 hover:border-slate-300 transition-all shadow-sm">
-            <ArrowLeft size={20} />
-          </button>
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Edit Product</h1>
-            <p className="text-slate-500 mt-1">Update details and inventory levels</p>
-          </div>
-        </div>
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-slate-900">Edit Product</h1>
       </div>
 
       <form onSubmit={handleSubmit(onUpdate)} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-
-        {/* LEFT COLUMN */}
         <div className="lg:col-span-8 space-y-8">
 
-          {/* 1. Basic Details */}
+          {/* 1. BASIC INFO */}
           <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-50">
               <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"><PackageOpen size={20} /></div>
-              <h2 className="text-lg font-semibold text-slate-900">Product Information</h2>
+              <h2 className="text-lg font-semibold text-slate-900">Basic Details</h2>
             </div>
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="md:col-span-2">
                 <label className="label">Product Name</label>
-                <input {...register('name')} className="input-field" />
-              </div>
-              <div>
-                <label className="label">Price (₹)</label>
-                <input type="number" {...register('price')} className="input-field" />
+                <input {...register('name', { required: true })} className="input-field" />
               </div>
               <div>
                 <label className="label">Category</label>
-                <select {...register('category_id')} className="input-field appearance-none bg-white">
-                    {meta.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <select {...register('category_id', { required: true })} className="input-field bg-white">
+                  <option value="">Select Category</option>
+                  {meta.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>
               <div>
                 <label className="label">Fabric</label>
-                <select {...register('fabric_id')} className="input-field appearance-none bg-white">
-                    {meta.fabrics.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                <select {...register('fabric_id', { required: true })} className="input-field bg-white">
+                  <option value="">Select Fabric</option>
+                  {meta.fabrics.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </select>
               </div>
               <div>
                 <label className="label">Design</label>
-                <select {...register('design_id')} className="input-field appearance-none bg-white">
-                    {meta.designs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                <select {...register('design_id', { required: true })} className="input-field bg-white">
+                  <option value="">Select Design</option>
+                  {meta.designs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
               <div className="md:col-span-2">
                 <label className="label">Description</label>
-                <textarea {...register('description')} rows={4} className="input-field resize-none" />
+                <textarea {...register('description')} rows={3} className="input-field" />
               </div>
             </div>
           </section>
 
-          {/* 2. Color Sections */}
+          {/* 2. PRICING STRATEGY */}
+          <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-50">
+              <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><DollarSign size={20} /></div>
+              <h2 className="text-lg font-semibold text-slate-900">Pricing & Strategy</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div>
+                <label className="label">Base Price (₹)</label>
+                <input type="number" step="0.01" {...register('price', { required: true })} className="input-field" placeholder="0.00" />
+              </div>
+              <div>
+                <label className="label">Sale Price (₹) <span className="text-xs text-slate-400 font-normal">(Optional)</span></label>
+                <input type="number" step="0.01" {...register('sale_price')} className="input-field" placeholder="0.00" />
+              </div>
+              <div>
+                <label className="label">Cost Price (₹) <span className="text-xs text-slate-400 font-normal">(Internal)</span></label>
+                <input type="number" step="0.01" {...register('cost_price')} className="input-field bg-slate-50 border-slate-200" placeholder="0.00" />
+              </div>
+              <div className="md:col-span-3">
+                <label className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">
+                  <input type="checkbox" {...register('is_on_sale')} className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500" />
+                  <span className="font-medium text-slate-700">Activate "On Sale" Status</span>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          {/* 3. SEO & TAGS */}
+          <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-50">
+              <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Globe size={20} /></div>
+              <h2 className="text-lg font-semibold text-slate-900">SEO & Metadata</h2>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="label">Meta Title</label>
+                <input {...register('meta_title')} className="input-field" />
+              </div>
+              <div>
+                <label className="label">Meta Description</label>
+                <textarea {...register('meta_description')} rows={2} className="input-field" />
+              </div>
+              <div>
+                <label className="label">Keywords <span className="text-xs text-slate-400">(Comma separated)</span></label>
+                <input {...register('keywords')} className="input-field" />
+              </div>
+              {/* TAGS UI */}
+              <div>
+                <label className="label mb-2 block">Product Tags</label>
+                <div className="flex flex-wrap gap-2">
+                  {meta.tags.map(tag => (
+                    <button
+                      key={tag.id}
+                      type="button"
+                      onClick={() => toggleTag(tag.id)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${selectedTagIds.includes(tag.id)
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                        }`}
+                    >
+                      {tag.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* 4. VARIANTS */}
           <div className="space-y-6">
             {selectedColorIds.map((colorId, idx) => {
               const color = meta.colors.find(c => c.id === colorId);
               const myImages = colorImages[colorId] || [];
-
               return (
-                <section key={colorId} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-500 fill-mode-backwards" style={{ animationDelay: `${idx * 100}ms` }}>
-                  <div className="bg-slate-50/50 px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-6 h-6 rounded-full shadow-inner ring-1 ring-black/10" style={{ backgroundColor: color?.hex_code }}></div>
-                      <h3 className="font-semibold text-slate-900 text-lg">{color?.name} Setup</h3>
+                <section key={colorId} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                  <div className="flex justify-between items-center mb-4">
+                    <div className="flex items-center gap-2 font-semibold text-lg">
+                      <div className="w-5 h-5 rounded-full border border-slate-200" style={{ backgroundColor: color?.hex_code }}></div>
+                      {color?.name}
                     </div>
-                    <button type="button" onClick={() => toggleColor(colorId)} className="text-slate-400 hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                    <button type="button" onClick={() => toggleColor(colorId)} className="text-slate-400 hover:text-red-500">
+                      <Trash2 size={18} />
+                    </button>
                   </div>
 
-                  <div className="p-6 grid grid-cols-1 xl:grid-cols-3 gap-8">
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
                     {/* Images */}
-                    <div className="xl:col-span-1 space-y-4">
-                      <div className="flex justify-between items-center">
-                        <label className="text-sm font-semibold text-slate-900">Gallery</label>
-                        <span className="text-xs font-medium text-slate-400">{myImages.length} images</span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="flex gap-2 mb-2 overflow-x-auto pb-2">
                         {myImages.map((url, i) => (
-                          <div key={i} className="group relative aspect-3/4 rounded-lg overflow-hidden border border-slate-200 bg-slate-100">
-                            <img src={url} alt="" className="w-full h-full object-cover" />
-                            <button type="button" onClick={() => removeImage(colorId, i)} className="absolute top-2 right-2 p-1.5 bg-white/90 text-red-500 rounded-md opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14} /></button>
+                          <div key={i} className="relative w-20 h-24 shrink-0 group">
+                            <img src={url} className="w-full h-full object-cover rounded-md border border-slate-200" />
+                            <button type="button" onClick={() => removeImage(colorId, i)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"><X size={12} /></button>
                           </div>
                         ))}
-                        <button type="button" onClick={() => openWidget(colorId)} className="aspect-3/4 border-2 border-dashed border-slate-300 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50/50 transition-all">
+                        <button type="button" onClick={() => openWidget(colorId)} className="w-20 h-24 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-md text-slate-400 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50/50 transition-all">
                           <ImageIcon size={20} />
-                          <span className="text-xs font-medium mt-2">Add Photo</span>
+                          <span className="text-[10px] mt-1">Add</span>
                         </button>
                       </div>
                     </div>
 
-                    {/* Matrix */}
-                    <div className="xl:col-span-2">
-                        <div className="bg-slate-50 rounded-xl p-5 border border-slate-200/60">
-                            <label className="text-sm font-semibold text-slate-900 mb-4 block">Inventory</label>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                                {meta.sizes.map(size => (
-                                    <div key={size.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                                        <div className="text-xs font-bold text-slate-400 mb-3 uppercase flex justify-between">{size.name}</div>
-                                        <div className="space-y-3">
-                                            <div>
-                                                <label className="text-[10px] text-slate-400 uppercase font-semibold mb-1 block">Quantity</label>
-                                                <input type="number" {...register(`variants.${colorId}.${size.id}.stock`)} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" placeholder="0" />
-                                            </div>
-                                            <div>
-                                                <label className="text-[10px] text-slate-400 uppercase font-semibold mb-1 block">SKU</label>
-                                                <input type="text" {...register(`variants.${colorId}.${size.id}.sku`)} className="w-full px-2 py-1 bg-transparent border-b border-dashed border-slate-300 rounded-none text-xs" placeholder="SKU" />
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
+                    {/* Stock Matrix */}
+                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                      {meta.sizes.map(size => (
+                        <div key={size.id} className="bg-slate-50 p-2 rounded-lg border border-slate-200">
+                          <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">{size.name}</div>
+
+                          {/* UPDATED STOCK INPUT: Validated & Trigger for SKU */}
+                          <input
+                            type="number"
+                            min="0"
+                            onKeyDown={(e) => { if(e.key === '-' || e.key === 'e') e.preventDefault(); }}
+                            placeholder="Qty"
+                            {...register(`variants.${colorId}.${size.id}.stock`, {
+                                min: 0,
+                                onChange: (e) => handleStockChange(colorId, size, e.target.value)
+                            })}
+                            className="w-full bg-white border border-slate-200 rounded px-1.5 py-1 text-xs mb-1 focus:ring-1 focus:ring-indigo-500 outline-none"
+                          />
+
+                          <input
+                            type="text"
+                            placeholder="SKU"
+                            {...register(`variants.${colorId}.${size.id}.sku`)}
+                            className="w-full bg-transparent border-b border-dashed border-slate-300 rounded-none px-0 py-0.5 text-[10px] focus:border-indigo-500 outline-none font-mono"
+                          />
                         </div>
+                      ))}
                     </div>
                   </div>
                 </section>
-              );
+              )
             })}
           </div>
         </div>
 
-        {/* RIGHT COLUMN */}
-        <div className="lg:col-span-4">
-            {/* STICKY WRAPPER: Holds both Colors & Actions on Desktop */}
-            <div className="space-y-6 lg:sticky lg:top-6">
-
-                {/* Colors Card */}
-                <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                    <h2 className="text-lg font-semibold text-slate-900 mb-4">Color Variants</h2>
-
-                    {/* Search Bar */}
-                    <div className="relative mb-4">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                        <input
-                            type="text" placeholder="Search colors..."
-                            value={colorSearch} onChange={(e) => setColorSearch(e.target.value)}
-                            className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500/20 outline-none"
-                        />
-                    </div>
-
-                    <div className="space-y-3 overflow-y-auto pr-2" style={{ maxHeight: '300px', scrollbarWidth: 'thin' }}>
-                        {filteredColors.map(col => {
-                            const isSelected = selectedColorIds.includes(col.id);
-                            return (
-                                <button type="button" key={col.id} onClick={() => toggleColor(col.id)}
-                                    className={`w-full flex items-center justify-between p-3 rounded-xl border transition-all ${isSelected ? 'bg-slate-900 border-slate-900 text-white shadow-md' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                                    <div className="flex items-center gap-3">
-                                        <div className={`w-6 h-6 rounded-full border ${isSelected ? 'border-white/20' : 'border-slate-200'}`} style={{backgroundColor: col.hex_code}}></div>
-                                        <span className="font-medium">{col.name}</span>
-                                    </div>
-                                    {isSelected && <Check size={16} className="text-white" />}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </section>
-
-                {/* Action Bar */}
-                <div className="fixed bottom-0 left-0 right-0 z-50 p-4 bg-white border-t border-slate-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] lg:static lg:z-auto lg:p-6 lg:rounded-2xl lg:border lg:shadow-sm">
-                     <div className="hidden lg:block"><h2 className="text-lg font-semibold text-slate-900 mb-4">Publishing</h2></div>
-                     <div className="grid grid-cols-2 gap-3 lg:grid-cols-1">
-                        <button type="submit" disabled={loading} className="w-full py-3.5 bg-slate-900 text-white font-medium rounded-xl hover:bg-indigo-600 transition-all flex items-center justify-center gap-2">
-                            {loading ? <Loader2 className="animate-spin" size={20}/> : <><Save size={20}/> <span className="hidden sm:inline">Update Product</span><span className="sm:hidden">Update</span></>}
-                        </button>
-                        <button type="button" onClick={() => navigate('/products')} className="w-full py-3.5 bg-white text-slate-600 font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors">
-                            Cancel
-                        </button>
-                     </div>
-                </div>
-
+        <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-6 lg:h-fit">
+          {/* SIDEBAR: COLOR PICKER */}
+          <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+            <h2 className="text-lg font-semibold text-slate-900 mb-4">Variants</h2>
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
+              <input type="text" placeholder="Search colors..." value={colorSearch} onChange={(e) => setColorSearch(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm" />
             </div>
+            <div className="space-y-2 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+              {filteredColors.map(col => (
+                <button key={col.id} type="button" onClick={() => toggleColor(col.id)} className={`w-full flex items-center justify-between p-2 rounded-lg border transition-all ${selectedColorIds.includes(col.id) ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-100 hover:bg-slate-50'}`}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-5 h-5 rounded-full border border-slate-200" style={{ backgroundColor: col.hex_code }}></div>
+                    <span className="text-sm font-medium">{col.name}</span>
+                  </div>
+                  {selectedColorIds.includes(col.id) && <Check size={14} />}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <button type="submit" disabled={loading} className="w-full py-3 bg-slate-900 text-white font-medium rounded-xl hover:bg-slate-800 flex items-center justify-center gap-2 shadow-lg shadow-slate-900/10 transition-all">
+            {loading ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+            <span>{loading ? 'Updating...' : 'Save Changes'}</span>
+          </button>
         </div>
       </form>
     </div>

@@ -6,6 +6,11 @@ import AddProduct from '../pages/AddProduct';
 import Layout from '../components/layout/Layout';
 import Products from '../pages/Products';
 import EditProduct from '../pages/EditProduct';
+import Attributes from '../pages/Attributes';
+import SalesManager from '../pages/SalesManager';
+import CreateOrder from '../pages/CreateOrder';
+import Orders from '../pages/Orders';
+import Settings from '../pages/Settings';
 
 export default function AppRoutes() {
   return (
@@ -20,6 +25,11 @@ export default function AppRoutes() {
           <Route path="/add-product" element={<AddProduct />}/>
           <Route path="/products" element={<Products />} />
           <Route path="/edit-product/:id" element={<EditProduct />} />
+          <Route path="/attributes" element={<Attributes />} />
+          <Route path="/sales" element={<SalesManager />} />
+          <Route path="/orders" element={<Orders />} />
+          <Route path="/orders/create" element={<CreateOrder />} />
+          <Route path="/settings" element={<Settings />} />
         </Route>
       </Route>
 
