@@ -59,7 +59,7 @@ export default function EditProduct() {
     }
   };
 
-  // 4. LOAD DATA
+// 4. LOAD DATA
   useEffect(() => {
     const loadAllData = async () => {
       try {
@@ -69,13 +69,35 @@ export default function EditProduct() {
           supabase.from('fabrics').select('*'),
           supabase.from('designs').select('*'),
           supabase.from('colors').select('*'),
-          supabase.from('sizes').select('*').order('name'),
+          // Remove .order('name') as we will sort manually in JS
+          supabase.from('sizes').select('*'),
           supabase.from('tags').select('*').order('name'),
         ]);
 
+        // --- CUSTOM SORTING LOGIC ---
+        const sizeOrder = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
+
+        const sortedSizes = (siz.data || []).sort((a, b) => {
+          const indexA = sizeOrder.indexOf(a.name);
+          const indexB = sizeOrder.indexOf(b.name);
+
+          // If both are in our list, sort by the index
+          if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+          // If only A is in list, put A first
+          if (indexA !== -1) return -1;
+          // If only B is in list, put B first
+          if (indexB !== -1) return 1;
+          // Otherwise keep original order
+          return 0;
+        });
+        // -----------------------------
+
         setMeta({
-          categories: cats.data || [], fabrics: fabs.data || [],
-          designs: des.data || [], colors: cols.data || [], sizes: siz.data || [],
+          categories: cats.data || [],
+          fabrics: fabs.data || [],
+          designs: des.data || [],
+          colors: cols.data || [],
+          sizes: sortedSizes, // Use the sorted array here
           tags: tags.data || []
         });
 

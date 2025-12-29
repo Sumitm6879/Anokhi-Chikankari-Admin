@@ -52,7 +52,7 @@ export default function AddProduct() {
     }
   };
 
-  // 4. Fetch Data
+// 4. Fetch Data
   useEffect(() => {
     const fetchData = async () => {
       const [cats, fabs, des, cols, siz, tags] = await Promise.all([
@@ -60,16 +60,31 @@ export default function AddProduct() {
         supabase.from('fabrics').select('*'),
         supabase.from('designs').select('*'),
         supabase.from('colors').select('*'),
-        supabase.from('sizes').select('*').order('name'),
+        // Remove .order('name') here as well
+        supabase.from('sizes').select('*'),
         supabase.from('tags').select('*').order('name'),
       ]);
+
+      // --- CUSTOM SORTING LOGIC ---
+      const sizeOrder = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
+
+      const sortedSizes = (siz.data || []).sort((a, b) => {
+        const indexA = sizeOrder.indexOf(a.name);
+        const indexB = sizeOrder.indexOf(b.name);
+
+        if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+        return 0;
+      });
+      // -----------------------------
 
       setMeta({
         categories: cats.data || [],
         fabrics: fabs.data || [],
         designs: des.data || [],
         colors: cols.data || [],
-        sizes: siz.data || [],
+        sizes: sortedSizes, // Use sorted sizes
         tags: tags.data || [],
       });
     };

@@ -8,8 +8,7 @@ import {
   AlertTriangle,
   Loader2,
   Clock,
-  CheckCircle,
-  IndianRupee, // Using standard currency icon
+  IndianRupee,
   ArrowRight
 } from 'lucide-react';
 
@@ -36,14 +35,17 @@ export default function Dashboard() {
   async function fetchDashboardData() {
     try {
       // 1. Fetch Order Metrics (Revenue & Pending Counts)
-      // Note: In a large scale app, use an RPC function for sum. For now, JS reduce is fine.
       const { data: allOrders, error: orderError } = await supabase
         .from('orders')
         .select('total_amount, status');
 
       if (orderError) throw orderError;
 
-      const totalRevenue = allOrders?.reduce((sum, order) => sum + (order.total_amount || 0), 0) || 0;
+      // UPDATED LOGIC: Filter out 'cancelled' orders before calculating revenue
+      const totalRevenue = allOrders
+        ?.filter(o => o.status !== 'cancelled')
+        .reduce((sum, order) => sum + (order.total_amount || 0), 0) || 0;
+
       const pendingOrders = allOrders?.filter(o => o.status === 'pending').length || 0;
 
       // 2. Fetch Product Metrics (Active & On Sale)
@@ -148,7 +150,7 @@ export default function Dashboard() {
           value={`₹${stats.totalRevenue.toLocaleString()}`}
           icon={<IndianRupee className="text-emerald-600" size={24} />}
           bg="bg-emerald-50"
-          subtext="Lifetime earnings"
+          subtext="Excludes cancelled orders"
         />
 
         {/* Pending Orders */}
