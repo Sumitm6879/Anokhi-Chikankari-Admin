@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2, Mail, Lock, ArrowRight } from 'lucide-react';
+import { logAction } from '../lib/logger';
 
 export default function Login() {
   const [loading, setLoading] = useState(false);
@@ -30,6 +31,7 @@ export default function Login() {
     if (error) {
       alert(error.message);
     } else {
+      await logAction('LOGIN', 'Auth', `User logged in: ${email}`);
       navigate('/');
     }
 

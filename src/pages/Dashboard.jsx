@@ -134,7 +134,7 @@ export default function Dashboard() {
         </div>
         <div className="flex gap-3">
           <button
-            onClick={() => navigate('/create-order')}
+            onClick={() => navigate('/orders/create')}
             className="px-4 py-2 bg-slate-900 text-white text-sm font-medium rounded-lg hover:bg-black transition-all"
           >
             + New Order

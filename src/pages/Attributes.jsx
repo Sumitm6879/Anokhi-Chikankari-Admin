@@ -10,7 +10,7 @@ import {
   Trash2,
   Loader2,
   Search,
-  Hash // New Icon for Tags
+  Hash
 } from 'lucide-react';
 
 export default function Attributes() {
@@ -21,7 +21,6 @@ export default function Attributes() {
   const [newItem, setNewItem] = useState({ name: '', hex_code: '#000000' });
   const [search, setSearch] = useState('');
 
-  // UPDATED: Added 'tags' to the list
   const tabs = [
     { id: 'categories', label: 'Categories', icon: Tags, table: 'categories' },
     { id: 'fabrics', label: 'Fabrics', icon: Scissors, table: 'fabrics' },
@@ -71,7 +70,7 @@ export default function Attributes() {
         .single();
 
       if (error) throw error;
-
+      await logAction('CREATE', 'Attribute', `Created new ${currentTabInfo.label}: ${inserted.name}`, inserted);
       setData(prev => [...prev, inserted].sort((a, b) => a.name.localeCompare(b.name)));
       setNewItem({ name: '', hex_code: '#000000' });
       toast.success(`${currentTabInfo.label.slice(0, -1)} added successfully`);
@@ -102,6 +101,7 @@ export default function Attributes() {
       }
 
       setData(prev => prev.filter(item => item.id !== id));
+      await logAction('DELETE', 'Attribute', `Deleted ${currentTabInfo.label} ID: ${id}`);
       toast.success("Item deleted successfully");
 
     } catch (error) {

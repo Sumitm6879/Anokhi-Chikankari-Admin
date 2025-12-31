@@ -13,14 +13,19 @@ import {
   DollarSign,
   Globe,
   X,
-  Check
+  Check,
+  Maximize2
 } from 'lucide-react';
+import { logAction } from '../lib/logger';
 
 export default function EditProduct() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
+
+  // --- NEW: State for Image Preview ---
+  const [previewImage, setPreviewImage] = useState(null);
 
   // 1. Metadata State
   const [meta, setMeta] = useState({
@@ -33,20 +38,16 @@ export default function EditProduct() {
   const [colorImages, setColorImages] = useState({});
   const [colorSearch, setColorSearch] = useState('');
 
-  // 3. Form Setup (Added getValues to help with manual SKU check)
+  // 3. Form Setup
   const { register, handleSubmit, setValue, reset, watch, getValues, formState: { dirtyFields } } = useForm();
 
-  // --- NEW: Handle Stock Changes & Auto-SKU ---
+  // ... [Keep existing handleStockChange function] ...
   const handleStockChange = (colorId, size, qty) => {
-    // 1. If stock is less than 1 or empty, do nothing
     if (!qty || parseInt(qty) < 1) return;
-
-    // 2. Check if SKU is already there (We don't overwrite existing SKUs)
     const skuFieldName = `variants.${colorId}.${size.id}.sku`;
     const currentSku = getValues(skuFieldName);
     if (currentSku) return;
 
-    // 3. Generate SKU only if valid
     const productName = getValues('name') || '';
     const slug = productName.toLowerCase().trim().replace(/ /g, '-').replace(/[^\w-]+/g, '');
     const color = meta.colors.find(c => c.id === colorId);
@@ -54,54 +55,42 @@ export default function EditProduct() {
     if (slug && color) {
          const colorName = color.name.toLowerCase().replace(/ /g, '-');
          const sizeName = size.name.toLowerCase();
-         // SET THE SKU
          setValue(skuFieldName, `${slug}-${colorName}-${sizeName}`);
     }
   };
 
-// 4. LOAD DATA
+  // ... [Keep existing useEffect for loading data] ...
   useEffect(() => {
     const loadAllData = async () => {
       try {
-        // A. Metadata
         const [cats, fabs, des, cols, siz, tags] = await Promise.all([
           supabase.from('categories').select('*'),
           supabase.from('fabrics').select('*'),
           supabase.from('designs').select('*'),
           supabase.from('colors').select('*'),
-          // Remove .order('name') as we will sort manually in JS
           supabase.from('sizes').select('*'),
           supabase.from('tags').select('*').order('name'),
         ]);
 
-        // --- CUSTOM SORTING LOGIC ---
         const sizeOrder = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
-
         const sortedSizes = (siz.data || []).sort((a, b) => {
           const indexA = sizeOrder.indexOf(a.name);
           const indexB = sizeOrder.indexOf(b.name);
-
-          // If both are in our list, sort by the index
           if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-          // If only A is in list, put A first
           if (indexA !== -1) return -1;
-          // If only B is in list, put B first
           if (indexB !== -1) return 1;
-          // Otherwise keep original order
           return 0;
         });
-        // -----------------------------
 
         setMeta({
           categories: cats.data || [],
           fabrics: fabs.data || [],
           designs: des.data || [],
           colors: cols.data || [],
-          sizes: sortedSizes, // Use the sorted array here
+          sizes: sortedSizes,
           tags: tags.data || []
         });
 
-        // B. Fetch Product
         const { data: product, error } = await supabase
           .from('products')
           .select(`
@@ -117,7 +106,6 @@ export default function EditProduct() {
         if (error) throw error;
         if (!product) throw new Error("Product not found");
 
-        // C. Populate Form
         reset({
           name: product.name,
           description: product.description,
@@ -133,12 +121,10 @@ export default function EditProduct() {
           keywords: product.keywords ? product.keywords.join(', ') : ''
         });
 
-        // D. Populate Tags
         if (product.p_tags) {
           setSelectedTagIds(product.p_tags.map(t => t.tag_id));
         }
 
-        // E. Populate Images & Variants
         const activeColors = new Set();
         const imgMap = {};
 
@@ -174,7 +160,7 @@ export default function EditProduct() {
     loadAllData();
   }, [id, reset, setValue]);
 
-  // 5. HELPER FUNCTIONS
+  // ... [Keep helper functions: openWidget, toggleColor, toggleTag, removeImage] ...
   const openWidget = (colorId) => {
     const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
@@ -196,15 +182,13 @@ export default function EditProduct() {
 
   const filteredColors = meta.colors.filter(c => c.name.toLowerCase().includes(colorSearch.toLowerCase()));
 
-  // 6. SUBMIT LOGIC (Final Version)
+
   const onUpdate = async (formData) => {
     setLoading(true);
     try {
       if (selectedColorIds.length === 0) throw new Error("Select at least one color");
-
       const keywordsArray = formData.keywords ? formData.keywords.split(',').map(k => k.trim()).filter(Boolean) : [];
 
-      // --- STEP 0: PRE-VALIDATE SKUs ---
       const skusToCheck = [];
       selectedColorIds.forEach(colorId => {
         meta.sizes.forEach(size => {
@@ -214,7 +198,6 @@ export default function EditProduct() {
       });
 
       if (skusToCheck.length > 0) {
-        // Check for SKU conflicts with OTHER products
         const { data: conflicts } = await supabase
           .from('product_variants')
           .select('sku, products(name)')
@@ -227,7 +210,6 @@ export default function EditProduct() {
         }
       }
 
-      // --- STEP A: Update Product ---
       const { error: pError } = await supabase
         .from('products')
         .update({
@@ -247,7 +229,6 @@ export default function EditProduct() {
 
       if (pError) throw pError;
 
-      // --- STEP B: Update Extras ---
       if (formData.cost_price) {
         await supabase.from('product_costs').upsert({ product_id: id, cost_price: parseFloat(formData.cost_price) });
       }
@@ -266,76 +247,40 @@ export default function EditProduct() {
       });
       if (allImages.length > 0) await supabase.from('product_images').insert(allImages);
 
-      // --- STEP C: VARIANTS ---
-
-      // 1. Fetch Fresh IDs
-      const { data: currentDbVariants } = await supabase
-        .from('product_variants')
-        .select('id, color_id, size_id')
-        .eq('product_id', id);
-
+      const { data: currentDbVariants } = await supabase.from('product_variants').select('id, color_id, size_id').eq('product_id', id);
       const dbVariantMap = {};
-      currentDbVariants?.forEach(v => {
-        dbVariantMap[`${v.color_id}-${v.size_id}`] = v.id;
-      });
+      currentDbVariants?.forEach(v => { dbVariantMap[`${v.color_id}-${v.size_id}`] = v.id; });
 
-      // 2. Soft Delete removed variants
-      const variantsToDelete = currentDbVariants
-        ?.filter(v => !selectedColorIds.includes(v.color_id))
-        .map(v => v.id) || [];
-
+      const variantsToDelete = currentDbVariants?.filter(v => !selectedColorIds.includes(v.color_id)).map(v => v.id) || [];
       if (variantsToDelete.length > 0) {
         const { error: deleteError } = await supabase.from('product_variants').delete().in('id', variantsToDelete);
-        if (deleteError) {
-           await supabase.from('product_variants').update({ stock_quantity: 0 }).in('id', variantsToDelete);
-        }
+        if (deleteError) await supabase.from('product_variants').update({ stock_quantity: 0 }).in('id', variantsToDelete);
       }
 
-      // 3. Prepare Batches
       const updates = [];
       const inserts = [];
 
       selectedColorIds.forEach(colorId => {
         meta.sizes.forEach(size => {
           const vData = formData.variants?.[colorId]?.[size.id];
-          // Prevent negative values from form data
           const rawQty = parseInt(vData?.stock || 0);
           const qty = rawQty > 0 ? rawQty : 0;
           const sku = vData?.sku;
-
           const existingId = dbVariantMap[`${colorId}-${size.id}`];
+          const payload = { product_id: id, color_id: colorId, size_id: size.id, stock_quantity: qty, sku: sku };
 
-          const payload = {
-            product_id: id,
-            color_id: colorId,
-            size_id: size.id,
-            stock_quantity: qty,
-            sku: sku
-          };
-
-          if (existingId) {
-            updates.push({ ...payload, id: existingId });
-          } else {
-            inserts.push(payload);
-          }
+          if (existingId) updates.push({ ...payload, id: existingId });
+          else inserts.push(payload);
         });
       });
 
-      // 4. Execute
-      if (updates.length > 0) {
-        const { error: updateError } = await supabase.from('product_variants').upsert(updates);
-        if (updateError) throw updateError;
-      }
+      if (updates.length > 0) await supabase.from('product_variants').upsert(updates);
+      if (inserts.length > 0) await supabase.from('product_variants').upsert(inserts, { onConflict: 'product_id,color_id,size_id' });
 
-      if (inserts.length > 0) {
-        // Safe Upsert for inserts
-        const { error: insertError } = await supabase.from('product_variants').upsert(inserts, { onConflict: 'product_id,color_id,size_id' });
-        if (insertError) throw insertError;
-      }
+      await logAction('UPDATE', 'Product', `Updated product: ${formData.name}`, { productId: id });
 
       toast.success("Product updated successfully!");
       navigate('/products');
-
     } catch (error) {
       toast.error(error.message);
       console.error(error);
@@ -349,6 +294,28 @@ export default function EditProduct() {
   return (
     <div className="max-w-6xl mx-auto pb-32 pt-6 px-6">
       <Toaster position="top-right" richColors />
+
+      {/* --- NEW: Full Screen Image Modal --- */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-100 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setPreviewImage(null)}
+        >
+          <button
+            className="absolute top-6 right-6 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full p-2 transition-all"
+            onClick={() => setPreviewImage(null)}
+          >
+            <X size={32} />
+          </button>
+          <img
+            src={previewImage}
+            alt="Preview"
+            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-slate-900">Edit Product</h1>
       </div>
@@ -356,8 +323,8 @@ export default function EditProduct() {
       <form onSubmit={handleSubmit(onUpdate)} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-8 space-y-8">
 
-          {/* 1. BASIC INFO */}
-          <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+            {/* ... [Basic Info Section - Unchanged] ... */}
+             <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-50">
               <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"><PackageOpen size={20} /></div>
               <h2 className="text-lg font-semibold text-slate-900">Basic Details</h2>
@@ -395,7 +362,7 @@ export default function EditProduct() {
             </div>
           </section>
 
-          {/* 2. PRICING STRATEGY */}
+          {/* ... [Pricing Section - Unchanged] ... */}
           <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-50">
               <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><DollarSign size={20} /></div>
@@ -423,8 +390,8 @@ export default function EditProduct() {
             </div>
           </section>
 
-          {/* 3. SEO & TAGS */}
-          <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+          {/* ... [SEO Section - Unchanged] ... */}
+           <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-50">
               <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Globe size={20} /></div>
               <h2 className="text-lg font-semibold text-slate-900">SEO & Metadata</h2>
@@ -464,7 +431,7 @@ export default function EditProduct() {
             </div>
           </section>
 
-          {/* 4. VARIANTS */}
+          {/* 4. VARIANTS - UPDATED FOR IMAGE CLICK */}
           <div className="space-y-6">
             {selectedColorIds.map((colorId, idx) => {
               const color = meta.colors.find(c => c.id === colorId);
@@ -482,13 +449,31 @@ export default function EditProduct() {
                   </div>
 
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
-                    {/* Images */}
+                    {/* Images Section Updated */}
                     <div>
                       <div className="flex gap-2 mb-2 overflow-x-auto pb-2">
                         {myImages.map((url, i) => (
                           <div key={i} className="relative w-20 h-24 shrink-0 group">
-                            <img src={url} className="w-full h-full object-cover rounded-md border border-slate-200" />
-                            <button type="button" onClick={() => removeImage(colorId, i)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"><X size={12} /></button>
+                            {/* Updated Image with onClick and Cursor */}
+                            <img
+                                src={url}
+                                onClick={() => setPreviewImage(url)}
+                                className="w-full h-full object-cover rounded-md border border-slate-200 cursor-zoom-in hover:opacity-90 transition-opacity"
+                                alt="Variant"
+                            />
+                            {/* Hover Overlay Icon */}
+                             <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100">
+                                <Maximize2 size={16} className="text-white drop-shadow-md" />
+                             </div>
+
+                            {/* Remove Button (z-index ensure it stays on top) */}
+                            <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); removeImage(colorId, i); }}
+                                className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity z-10 hover:bg-red-600"
+                            >
+                                <X size={12} />
+                            </button>
                           </div>
                         ))}
                         <button type="button" onClick={() => openWidget(colorId)} className="w-20 h-24 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-md text-slate-400 hover:text-indigo-600 hover:border-indigo-400 hover:bg-indigo-50/50 transition-all">
@@ -503,8 +488,6 @@ export default function EditProduct() {
                       {meta.sizes.map(size => (
                         <div key={size.id} className="bg-slate-50 p-2 rounded-lg border border-slate-200">
                           <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">{size.name}</div>
-
-                          {/* UPDATED STOCK INPUT: Validated & Trigger for SKU */}
                           <input
                             type="number"
                             min="0"
@@ -516,7 +499,6 @@ export default function EditProduct() {
                             })}
                             className="w-full bg-white border border-slate-200 rounded px-1.5 py-1 text-xs mb-1 focus:ring-1 focus:ring-indigo-500 outline-none"
                           />
-
                           <input
                             type="text"
                             placeholder="SKU"
@@ -534,7 +516,7 @@ export default function EditProduct() {
         </div>
 
         <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-6 lg:h-fit">
-          {/* SIDEBAR: COLOR PICKER */}
+          {/* ... [Sidebar Colors - Unchanged] ... */}
           <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">Variants</h2>
             <div className="relative mb-4">

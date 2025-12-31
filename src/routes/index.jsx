@@ -11,6 +11,8 @@ import SalesManager from '../pages/SalesManager';
 import CreateOrder from '../pages/CreateOrder';
 import Orders from '../pages/Orders';
 import Settings from '../pages/Settings';
+import TrendingManager from '../pages/TrendingManager';
+import ActivityLogs from '../pages/ActivityLogs';
 
 export default function AppRoutes() {
   return (
@@ -30,6 +32,8 @@ export default function AppRoutes() {
           <Route path="/orders" element={<Orders />} />
           <Route path="/orders/create" element={<CreateOrder />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/trending" element={<TrendingManager />} />
+          <Route path="/logs" element={<ActivityLogs />} />
         </Route>
       </Route>
 

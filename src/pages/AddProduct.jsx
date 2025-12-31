@@ -15,12 +15,17 @@ import {
   X,
   DollarSign,
   Globe,
-  Tag
+  Tag,
+  Maximize2
 } from 'lucide-react';
+import { logAction } from '../lib/logger';
 
 export default function AddProduct() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
+
+  // --- NEW: State for Image Preview ---
+  const [previewImage, setPreviewImage] = useState(null);
 
   // 1. Metadata State
   const [meta, setMeta] = useState({
@@ -45,14 +50,13 @@ export default function AddProduct() {
 
   const watchedName = watch('name');
 
-  // Helper to block negative inputs
   const preventNegative = (e) => {
     if (['-', 'e', 'E', '+'].includes(e.key)) {
       e.preventDefault();
     }
   };
 
-// 4. Fetch Data
+  // ... [Keep Fetch Data] ...
   useEffect(() => {
     const fetchData = async () => {
       const [cats, fabs, des, cols, siz, tags] = await Promise.all([
@@ -60,38 +64,33 @@ export default function AddProduct() {
         supabase.from('fabrics').select('*'),
         supabase.from('designs').select('*'),
         supabase.from('colors').select('*'),
-        // Remove .order('name') here as well
         supabase.from('sizes').select('*'),
         supabase.from('tags').select('*').order('name'),
       ]);
 
-      // --- CUSTOM SORTING LOGIC ---
       const sizeOrder = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
-
       const sortedSizes = (siz.data || []).sort((a, b) => {
         const indexA = sizeOrder.indexOf(a.name);
         const indexB = sizeOrder.indexOf(b.name);
-
         if (indexA !== -1 && indexB !== -1) return indexA - indexB;
         if (indexA !== -1) return -1;
         if (indexB !== -1) return 1;
         return 0;
       });
-      // -----------------------------
 
       setMeta({
         categories: cats.data || [],
         fabrics: fabs.data || [],
         designs: des.data || [],
         colors: cols.data || [],
-        sizes: sortedSizes, // Use sorted sizes
+        sizes: sortedSizes,
         tags: tags.data || [],
       });
     };
     fetchData();
   }, []);
 
-  // 5. Auto SKU Generator
+  // ... [Keep Auto SKU] ...
   useEffect(() => {
     if (!watchedName) return;
     const slug = watchedName.toLowerCase().replace(/ /g, '-').replace(/[^\w-]+/g, '');
@@ -107,7 +106,7 @@ export default function AddProduct() {
     });
   }, [watchedName, selectedColorIds, meta.colors, meta.sizes, setValue, dirtyFields]);
 
-  // 6. Cloudinary Widget
+  // ... [Keep Cloudinary & Helper Functions] ...
   const openWidget = (colorId) => {
     const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
@@ -123,13 +122,10 @@ export default function AddProduct() {
     ).open();
   };
 
-  // 7. Submit Logic
   const onSubmit = async (formData) => {
     setLoading(true);
     try {
       if (selectedColorIds.length === 0) throw new Error("Please select at least one color");
-
-      // Validations
       for (const colorId of selectedColorIds) {
         if (!colorImages[colorId] || colorImages[colorId].length === 0) {
           throw new Error(`Please upload images for ${meta.colors.find(c => c.id === colorId)?.name}`);
@@ -140,7 +136,6 @@ export default function AddProduct() {
         ? formData.keywords.split(',').map(k => k.trim()).filter(k => k !== '')
         : [];
 
-      // A. Create Product
       const { data: product, error: pError } = await supabase
         .from('products')
         .insert({
@@ -161,7 +156,6 @@ export default function AddProduct() {
 
       if (pError) throw pError;
 
-      // B. Insert Cost Price
       if (formData.cost_price) {
         await supabase.from('product_costs').insert({
           product_id: product.id,
@@ -169,13 +163,11 @@ export default function AddProduct() {
         });
       }
 
-      // C. Insert Tags
       if (selectedTagIds.length > 0) {
         const tagInserts = selectedTagIds.map(tagId => ({ product_id: product.id, tag_id: tagId }));
         await supabase.from('product_tags').insert(tagInserts);
       }
 
-      // D. Insert Images
       const allImages = [];
       selectedColorIds.forEach((colorId, colorIndex) => {
         const imagesForColor = colorImages[colorId] || [];
@@ -187,7 +179,6 @@ export default function AddProduct() {
       });
       if (allImages.length > 0) await supabase.from('product_images').insert(allImages);
 
-      // E. Insert Variants
       const variantsToInsert = [];
       selectedColorIds.forEach(colorId => {
         meta.sizes.forEach(size => {
@@ -202,7 +193,7 @@ export default function AddProduct() {
         });
       });
       if (variantsToInsert.length > 0) await supabase.from('product_variants').insert(variantsToInsert);
-
+      await logAction('CREATE', 'Product', `Created new product: ${formData.name}`, { productId: product.id });
       toast.success("Product launched successfully!");
       navigate('/');
 
@@ -223,6 +214,28 @@ export default function AddProduct() {
   return (
     <div className="max-w-6xl mx-auto pb-32 pt-6 px-6">
       <Toaster position="top-right" richColors />
+
+      {/* --- NEW: Full Screen Image Modal --- */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-100 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setPreviewImage(null)}
+        >
+          <button
+            className="absolute top-6 right-6 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full p-2 transition-all"
+            onClick={() => setPreviewImage(null)}
+          >
+            <X size={32} />
+          </button>
+          <img
+            src={previewImage}
+            alt="Preview"
+            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-10">
         <h1 className="text-3xl font-bold text-slate-900">Create Product</h1>
       </div>
@@ -230,7 +243,7 @@ export default function AddProduct() {
       <form onSubmit={handleSubmit(onSubmit)} className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         <div className="lg:col-span-8 space-y-8">
 
-          {/* 1. MAIN INFO */}
+          {/* ... [Basic Info - Unchanged] ... */}
           <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-50">
               <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"><PackageOpen size={20} /></div>
@@ -269,8 +282,8 @@ export default function AddProduct() {
             </div>
           </section>
 
-          {/* 2. PRICING & STRATEGY */}
-          <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+          {/* ... [Pricing - Unchanged] ... */}
+           <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-50">
               <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><DollarSign size={20} /></div>
               <h2 className="text-lg font-semibold text-slate-900">Pricing & Strategy</h2>
@@ -321,8 +334,8 @@ export default function AddProduct() {
             </div>
           </section>
 
-          {/* 3. SEO & METADATA */}
-          <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+          {/* ... [SEO - Unchanged] ... */}
+           <section className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-50">
               <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Globe size={20} /></div>
               <h2 className="text-lg font-semibold text-slate-900">SEO & Metadata</h2>
@@ -340,7 +353,6 @@ export default function AddProduct() {
                 <label className="label">Keywords <span className="text-xs text-slate-400">(Comma separated)</span></label>
                 <input {...register('keywords')} className="input-field" placeholder="cotton, summer, casual" />
               </div>
-              {/* TAGS SELECTION */}
               <div>
                  <label className="label mb-2 block">Product Tags</label>
                  <div className="flex flex-wrap gap-2">
@@ -364,7 +376,7 @@ export default function AddProduct() {
             </div>
           </section>
 
-          {/* 4. VARIANTS & STOCK */}
+          {/* 4. VARIANTS - UPDATED FOR IMAGE CLICK */}
           <div className="space-y-6">
             {selectedColorIds.map((colorId, idx) => {
                const color = meta.colors.find(c => c.id === colorId);
@@ -377,19 +389,37 @@ export default function AddProduct() {
                     </div>
 
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                        {/* Images */}
+                        {/* Images Section Updated */}
                         <div>
                             <div className="flex gap-2 mb-2 overflow-x-auto pb-2">
                                 {myImages.map((url, i) => (
-                                    <div key={i} className="relative w-16 h-20 shrink-0">
-                                        <img src={url} className="w-full h-full object-cover rounded-md" />
-                                        <button type="button" onClick={() => removeImage(colorId, i)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X size={10}/></button>
+                                    <div key={i} className="relative w-16 h-20 shrink-0 group">
+                                        {/* Clickable Image */}
+                                        <img
+                                            src={url}
+                                            onClick={() => setPreviewImage(url)}
+                                            className="w-full h-full object-cover rounded-md cursor-zoom-in hover:opacity-90 transition-opacity"
+                                            alt="Variant"
+                                        />
+                                        {/* Hover Overlay Icon */}
+                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100">
+                                            <Maximize2 size={16} className="text-white drop-shadow-md" />
+                                        </div>
+
+                                        {/* Remove Button */}
+                                        <button
+                                            type="button"
+                                            onClick={(e) => { e.stopPropagation(); removeImage(colorId, i); }}
+                                            className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5 z-10 hover:bg-red-600"
+                                        >
+                                            <X size={10}/>
+                                        </button>
                                     </div>
                                 ))}
                                 <button type="button" onClick={() => openWidget(colorId)} className="w-16 h-20 flex items-center justify-center border-2 border-dashed border-slate-200 rounded-md text-slate-400 hover:text-indigo-600 hover:border-indigo-400"><ImageIcon size={20}/></button>
                             </div>
                         </div>
-                        {/* Stock Matrix with Negative Validation */}
+                        {/* Stock Matrix */}
                         <div className="grid grid-cols-3 gap-2">
                              {meta.sizes.map(size => (
                                  <div key={size.id} className="bg-slate-50 p-2 rounded border border-slate-200">
@@ -418,7 +448,7 @@ export default function AddProduct() {
           </div>
         </div>
 
-        {/* SIDEBAR */}
+        {/* ... [Sidebar - Unchanged] ... */}
         <div className="lg:col-span-4 space-y-6 lg:sticky lg:top-6 lg:h-fit">
           <section className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
             <h2 className="text-lg font-semibold text-slate-900 mb-4">Color Variants</h2>

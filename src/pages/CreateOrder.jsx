@@ -5,6 +5,7 @@ import {
   Search, Plus, Minus, ShoppingCart, User, MapPin,
   Save, Loader2, Trash2, Package, CreditCard, FileText
 } from 'lucide-react';
+import { logAction } from '../lib/logger';
 
 export default function CreateOrder() {
   const [loading, setLoading] = useState(false);
@@ -149,7 +150,7 @@ export default function CreateOrder() {
           .update({ stock_quantity: item.max_stock - item.qty })
           .eq('id', item.variant_id);
       }
-
+      await logAction('CREATE', 'Order', `Created Manual Order #${order.order_number}`, { total: cartTotal, items: cart.length });
       toast.success(`Order #${order.order_number} Created!`);
       setCart([]);
       setCustomer({ name: '', phone: '', payment_method: 'upi', notes: '' });

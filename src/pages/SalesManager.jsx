@@ -14,6 +14,7 @@ import {
   Hash,
   DollarSign
 } from 'lucide-react';
+import { logAction } from '../lib/logger';
 
 export default function SalesManager() {
   const [activeTab, setActiveTab] = useState('bulk');
@@ -104,6 +105,7 @@ function BulkSalesPanel() {
     try {
       const { error } = await supabase.from('products').update({ is_on_sale: false, sale_price: null }).eq('category_id', catId);
       if (error) throw error;
+      await logAction('DELETE', 'Sale', `Removed sale for category ID: ${catId}`, { categoryId: catId });
       toast.success("Category sale stopped.");
       fetchActiveSales();
     } catch (e) { toast.error(e.message); }
@@ -118,6 +120,7 @@ function BulkSalesPanel() {
     try {
       const { error } = await supabase.rpc('apply_category_discount', { target_category_id: selectedCat, discount_percent: parseFloat(percent) });
       if (error) throw error;
+      await logAction('CREATE', 'Sale', `Launched ${percent}% sale for category ID: ${selectedCat}`, { categoryId: selectedCat, percent });
       toast.success("Sale live!");
       setPercent(10); setSelectedCat(''); fetchActiveSales();
     } catch (e) { toast.error(e.message); }
@@ -138,7 +141,7 @@ const handleClearAll = async () => {
         .not('id', 'is', null);
 
       if (error) throw error;
-
+      await logAction('DELETE', 'Sale', 'Emergency Reset: Removed all discounts from store');
       toast.success("Store prices reset. All discounts removed.");
       fetchActiveSales();
     } catch (e) {
@@ -260,6 +263,7 @@ function CouponsPanel() {
     if (error) {
       toast.error(error.message);
     } else {
+      await logAction('CREATE', 'Coupon', `Created coupon: ${payload.code}`, payload);
       toast.success("Coupon created successfully!");
       setIsCreating(false);
       setFormData({ code: '', value: '', type: 'percentage', minOrder: '', maxUses: '', expiry: '' });
@@ -269,6 +273,7 @@ function CouponsPanel() {
 
   const deleteCoupon = async (id) => {
     if (!window.confirm("Permanently delete this coupon?")) return;
+    await logAction('DELETE', 'Coupon', `Deleted coupon ID: ${id}`);
     await supabase.from('coupons').delete().eq('id', id);
     fetchCoupons();
   };
@@ -389,7 +394,6 @@ function CouponsPanel() {
       )}
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        {/* FIXED: Mobile Scrolling Wrapper for Coupon Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-50 text-slate-500 font-medium border-b border-slate-100">

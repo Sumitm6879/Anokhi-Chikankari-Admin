@@ -13,6 +13,7 @@ import {
   Link as LinkIcon,
   X
 } from 'lucide-react';
+import { logAction } from '../lib/logger';
 
 export default function Settings() {
   const [loading, setLoading] = useState(false);
@@ -59,6 +60,7 @@ export default function Settings() {
         .upsert({ id: 1, ...config });
 
       if (error) throw error;
+      await logAction('UPDATE', 'Settings', 'Updated global store settings', config);
       toast.success("Store settings updated successfully!");
     } catch (error) {
       toast.error(error.message);
@@ -247,7 +249,7 @@ export default function Settings() {
                 </div>
             </div>
 
-            <div className="p-8 bg-slate-50 min-h-[300px]">
+            <div className="p-8 bg-slate-50 min-h-75">
                 {(!config.banners || config.banners.length === 0) && (
                     <div className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-slate-300 rounded-2xl bg-white/50 text-slate-400">
                         <ImageIcon size={48} className="mb-4 opacity-50"/>
@@ -262,9 +264,9 @@ export default function Settings() {
                         <div key={index} className="group relative bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-lg transition-all duration-300">
 
                             {/* Large Image Preview */}
-                            <div className="aspect-[21/9] w-full bg-slate-200 relative">
+                            <div className="aspect-21/9 w-full bg-slate-200 relative">
                                 <img src={banner.url} alt="Banner" className="w-full h-full object-cover" />
-                                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                                <div className="absolute inset-0 bg-linear-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
 
                                 <button
                                     onClick={() => removeBanner(index)}

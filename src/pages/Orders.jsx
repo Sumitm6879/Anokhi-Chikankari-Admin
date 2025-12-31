@@ -20,6 +20,7 @@ import {
   CheckSquare,
   Square
 } from 'lucide-react';
+import { logAction } from '../lib/logger';
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
@@ -100,7 +101,7 @@ export default function Orders() {
   // --- NEW: Print Manifest Logic ---
   const generateManifest = () => {
     if (selectedOrderIds.length === 0) return toast.error("Select orders to print");
-
+    logAction('PRINT', 'Order', `Printed manifest for ${selectedOrderIds.length} orders`);
     const selectedData = orders.filter(o => selectedOrderIds.includes(o.id));
     const printWindow = window.open('', '_blank');
 
@@ -225,7 +226,7 @@ export default function Orders() {
         const { error } = await supabase.from('orders').update({ status: newStatus, notes: updatedNotes }).eq('id', order.id);
 
         if (error) throw error;
-
+        await logAction('UPDATE', 'Order', `Updated Order #${order.order_number} to ${newStatus}`, { orderId: order.id });
         setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: newStatus, notes: updatedNotes } : o));
         toast.success(`Order ${newStatus.toUpperCase()}`);
         setActionModal({ open: false, order: null, newStatus: '', note: '' });

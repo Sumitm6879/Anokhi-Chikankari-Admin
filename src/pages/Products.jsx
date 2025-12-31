@@ -21,6 +21,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
+import { logAction } from '../lib/logger';
 
 export default function Products() {
   const navigate = useNavigate();
@@ -106,6 +107,7 @@ export default function Products() {
       const { error } = await supabase.from('products').update({ is_active: !currentStatus }).eq('id', id);
       if (error) throw error;
       setProducts(prev => prev.map(p => p.id === id ? { ...p, is_active: !currentStatus } : p));
+      await logAction('UPDATE', 'Product', `Toggled product visibility (Active: ${!currentStatus})`, { id });
       toast.success(currentStatus ? 'Product hidden' : 'Product published');
     } catch (error) { toast.error('Could not update status'); }
   };
@@ -116,6 +118,7 @@ export default function Products() {
     try {
       await supabase.from('products').update({ is_active: false }).eq('id', id);
       await supabase.from('product_variants').update({ stock_quantity: 0 }).eq('product_id', id);
+      await logAction('ARCHIVE', 'Product', `Archived product: ${name}`, { id });
       setProducts(prev => prev.map(p => p.id === id ? { ...p, is_active: false, variants: p.variants.map(v => ({ ...v, stock_quantity: 0 })) } : p));
       toast.success("Archived");
     } catch (error) { toast.error("Error archiving"); }

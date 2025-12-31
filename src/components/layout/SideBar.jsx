@@ -13,6 +13,8 @@ import {
   Percent,
   ShoppingCart,
   Settings,
+  TrendingUp,
+  NotebookPen
 } from 'lucide-react';
 
 export default function SideBar({ isOpen, onClose }) {
@@ -24,11 +26,14 @@ export default function SideBar({ isOpen, onClose }) {
     { name: 'Overview', path: '/', icon: LayoutDashboard },
     { name: 'New Order', path: '/orders/create', icon: ShoppingCart },
     { name: 'Products', path: '/products', icon: Package },
+    { name: 'Trending Products', path: '/trending', icon: TrendingUp },
     { name: 'Sales & Offers', path: '/sales', icon: Percent },
     { name: 'Order Management', path: '/orders', icon: ShoppingBag },
     { name: 'Customers', path: '/customers', icon: Users },
     { name: 'Attributes', path: '/attributes', icon: Tags },
     { name: 'Store Settings', path: '/settings', icon: Settings },
+    { name: 'Logs', path: '/logs', icon:   NotebookPen
+ },
   ];
 
   return (
