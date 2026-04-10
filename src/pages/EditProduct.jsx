@@ -14,9 +14,11 @@ import {
   Globe,
   X,
   Check,
-  Maximize2
+  Maximize2,
+  AlertCircle
 } from 'lucide-react';
 import { logAction } from '../lib/logger';
+import { EDIT_PRODUCT_ERROR_CODES, createEditProductError, getEditProductErrorView } from '../lib/editProductErrors';
 
 export default function EditProduct() {
   const { id } = useParams();
@@ -37,9 +39,10 @@ export default function EditProduct() {
   const [selectedTagIds, setSelectedTagIds] = useState([]);
   const [colorImages, setColorImages] = useState({});
   const [colorSearch, setColorSearch] = useState('');
+  const [errorModal, setErrorModal] = useState({ open: false, code: '', title: '', message: '', operation: '' });
 
   // 3. Form Setup
-  const { register, handleSubmit, setValue, reset, watch, getValues, formState: { dirtyFields } } = useForm();
+  const { register, handleSubmit, setValue, reset, getValues } = useForm();
 
   // ... [Keep existing handleStockChange function] ...
   const handleStockChange = (colorId, size, qty) => {
@@ -59,6 +62,13 @@ export default function EditProduct() {
     }
   };
 
+  const showErrorModal = (error) => {
+    const view = getEditProductErrorView(error);
+    setErrorModal({ open: true, ...view });
+  };
+
+  const closeErrorModal = () => setErrorModal(prev => ({ ...prev, open: false }));
+
   // ... [Keep existing useEffect for loading data] ...
   useEffect(() => {
     const loadAllData = async () => {
@@ -71,6 +81,25 @@ export default function EditProduct() {
           supabase.from('sizes').select('*'),
           supabase.from('tags').select('*').order('name'),
         ]);
+
+        const loadErrors = [
+          [cats.error, 'categories'],
+          [fabs.error, 'fabrics'],
+          [des.error, 'designs'],
+          [cols.error, 'colors'],
+          [siz.error, 'sizes'],
+          [tags.error, 'tags'],
+        ];
+
+        const firstLoadError = loadErrors.find(([error]) => error);
+        if (firstLoadError) {
+          throw createEditProductError({
+            code: EDIT_PRODUCT_ERROR_CODES.LOAD_METADATA_FAILED,
+            operation: `load ${firstLoadError[1]}`,
+            message: firstLoadError[0].message,
+            details: firstLoadError[0],
+          });
+        }
 
         const sizeOrder = ['S', 'M', 'L', 'XL', 'XXL', '3XL', '4XL', '5XL'];
         const sortedSizes = (siz.data || []).sort((a, b) => {
@@ -103,8 +132,21 @@ export default function EditProduct() {
           .eq('id', id)
           .single();
 
-        if (error) throw error;
-        if (!product) throw new Error("Product not found");
+        if (error) {
+          throw createEditProductError({
+            code: EDIT_PRODUCT_ERROR_CODES.LOAD_PRODUCT_FAILED,
+            operation: 'load product record',
+            message: error.message,
+            details: error,
+          });
+        }
+        if (!product) {
+          throw createEditProductError({
+            code: EDIT_PRODUCT_ERROR_CODES.LOAD_PRODUCT_FAILED,
+            operation: 'load product record',
+            message: 'Product not found',
+          });
+        }
 
         reset({
           name: product.name,
@@ -151,7 +193,16 @@ export default function EditProduct() {
         setColorImages(imgMap);
 
       } catch (error) {
-        toast.error("Error loading product");
+        showErrorModal(
+          error?.code
+            ? error
+            : createEditProductError({
+                code: EDIT_PRODUCT_ERROR_CODES.LOAD_PRODUCT_FAILED,
+                operation: 'load product record',
+                message: error?.message,
+                details: error,
+              })
+        );
         console.error(error);
       } finally {
         setFetching(false);
@@ -164,7 +215,14 @@ export default function EditProduct() {
   const openWidget = (colorId) => {
     const cloudName = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
     const uploadPreset = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET;
-    if (!cloudName || !uploadPreset) return toast.error("Missing Cloudinary credentials");
+    if (!cloudName || !uploadPreset) {
+      showErrorModal(createEditProductError({
+        code: EDIT_PRODUCT_ERROR_CODES.MISSING_CLOUDINARY_CREDENTIALS,
+        operation: 'open Cloudinary upload widget',
+        message: 'Missing Cloudinary credentials',
+      }));
+      return;
+    }
 
     window.cloudinary.createUploadWidget(
       { cloudName, uploadPreset, sources: ['local', 'url'], multiple: true, maxImageFileSize: 10000000 },
@@ -186,7 +244,13 @@ export default function EditProduct() {
   const onUpdate = async (formData) => {
     setLoading(true);
     try {
-      if (selectedColorIds.length === 0) throw new Error("Select at least one color");
+      if (selectedColorIds.length === 0) {
+        throw createEditProductError({
+          code: EDIT_PRODUCT_ERROR_CODES.NO_COLORS_SELECTED,
+          operation: 'validate selected colors',
+          message: 'Select at least one color',
+        });
+      }
       const keywordsArray = formData.keywords ? formData.keywords.split(',').map(k => k.trim()).filter(Boolean) : [];
 
       const skusToCheck = [];
@@ -206,7 +270,12 @@ export default function EditProduct() {
 
         if (conflicts && conflicts.length > 0) {
           const conflict = conflicts[0];
-          throw new Error(`SKU '${conflict.sku}' is already taken by product "${conflict.products?.name}".`);
+          throw createEditProductError({
+            code: EDIT_PRODUCT_ERROR_CODES.SKU_CONFLICT,
+            operation: 'check variant SKU uniqueness',
+            message: `SKU '${conflict.sku}' is already taken by product "${conflict.products?.name}".`,
+            details: conflict,
+          });
         }
       }
 
@@ -230,59 +299,152 @@ export default function EditProduct() {
       if (pError) throw pError;
 
       if (formData.cost_price) {
-        await supabase.from('product_costs').upsert({ product_id: id, cost_price: parseFloat(formData.cost_price) });
+        const { error: costError } = await supabase
+          .from('product_costs')
+          .upsert({ product_id: id, cost_price: parseFloat(formData.cost_price) });
+        if (costError) {
+          throw createEditProductError({
+            code: EDIT_PRODUCT_ERROR_CODES.UPDATE_COST_FAILED,
+            operation: 'upsert cost price',
+            message: costError.message,
+            details: costError,
+          });
+        }
       }
 
-      await supabase.from('product_tags').delete().eq('product_id', id);
+      const { error: deleteTagsError } = await supabase.from('product_tags').delete().eq('product_id', id);
+      if (deleteTagsError) {
+        throw createEditProductError({
+          code: EDIT_PRODUCT_ERROR_CODES.DELETE_TAGS_FAILED,
+          operation: 'delete existing tags',
+          message: deleteTagsError.message,
+          details: deleteTagsError,
+        });
+      }
+
       if (selectedTagIds.length > 0) {
-        await supabase.from('product_tags').insert(selectedTagIds.map(tid => ({ product_id: id, tag_id: tid })));
+        const { error: insertTagsError } = await supabase
+          .from('product_tags')
+          .insert(selectedTagIds.map(tid => ({ product_id: id, tag_id: tid })));
+        if (insertTagsError) {
+          throw createEditProductError({
+            code: EDIT_PRODUCT_ERROR_CODES.INSERT_TAGS_FAILED,
+            operation: 'insert updated tags',
+            message: insertTagsError.message,
+            details: insertTagsError,
+          });
+        }
       }
 
-      await supabase.from('product_images').delete().eq('product_id', id);
+      const { error: deleteImagesError } = await supabase.from('product_images').delete().eq('product_id', id);
+      if (deleteImagesError) {
+        throw createEditProductError({
+          code: EDIT_PRODUCT_ERROR_CODES.DELETE_IMAGES_FAILED,
+          operation: 'delete existing images',
+          message: deleteImagesError.message,
+          details: deleteImagesError,
+        });
+      }
+
       const allImages = [];
       selectedColorIds.forEach((colorId, idx) => {
         (colorImages[colorId] || []).forEach((url, i) => {
           allImages.push({ product_id: id, color_id: colorId, image_url: url, is_primary: idx === 0 && i === 0 });
         });
       });
-      if (allImages.length > 0) await supabase.from('product_images').insert(allImages);
+      if (allImages.length > 0) {
+        const { error: insertImagesError } = await supabase.from('product_images').insert(allImages);
+        if (insertImagesError) {
+          throw createEditProductError({
+            code: EDIT_PRODUCT_ERROR_CODES.INSERT_IMAGES_FAILED,
+            operation: 'insert updated images',
+            message: insertImagesError.message,
+            details: insertImagesError,
+          });
+        }
+      }
 
-      const { data: currentDbVariants } = await supabase.from('product_variants').select('id, color_id, size_id').eq('product_id', id);
-      const dbVariantMap = {};
-      currentDbVariants?.forEach(v => { dbVariantMap[`${v.color_id}-${v.size_id}`] = v.id; });
+      const { data: currentDbVariants, error: currentVariantsError } = await supabase
+        .from('product_variants')
+        .select('id, color_id, size_id')
+        .eq('product_id', id);
+      if (currentVariantsError) {
+        throw createEditProductError({
+          code: EDIT_PRODUCT_ERROR_CODES.FETCH_VARIANTS_FAILED,
+          operation: 'load existing variants',
+          message: currentVariantsError.message,
+          details: currentVariantsError,
+        });
+      }
 
       const variantsToDelete = currentDbVariants?.filter(v => !selectedColorIds.includes(v.color_id)).map(v => v.id) || [];
       if (variantsToDelete.length > 0) {
         const { error: deleteError } = await supabase.from('product_variants').delete().in('id', variantsToDelete);
-        if (deleteError) await supabase.from('product_variants').update({ stock_quantity: 0 }).in('id', variantsToDelete);
+        if (deleteError) {
+          throw createEditProductError({
+            code: EDIT_PRODUCT_ERROR_CODES.DELETE_VARIANTS_FAILED,
+            operation: 'delete stale variants',
+            message: deleteError.message,
+            details: deleteError,
+          });
+        }
       }
 
-      const updates = [];
-      const inserts = [];
+      const variantRows = [];
 
       selectedColorIds.forEach(colorId => {
         meta.sizes.forEach(size => {
           const vData = formData.variants?.[colorId]?.[size.id];
-          const rawQty = parseInt(vData?.stock || 0);
-          const qty = rawQty > 0 ? rawQty : 0;
-          const sku = vData?.sku;
-          const existingId = dbVariantMap[`${colorId}-${size.id}`];
-          const payload = { product_id: id, color_id: colorId, size_id: size.id, stock_quantity: qty, sku: sku };
+          const rawQty = Number(vData?.stock);
+          const qty = Number.isFinite(rawQty) && rawQty > 0 ? rawQty : 0;
+          const sku = vData?.sku?.trim() || null;
 
-          if (existingId) updates.push({ ...payload, id: existingId });
-          else inserts.push(payload);
+          variantRows.push({
+            product_id: id,
+            color_id: colorId,
+            size_id: size.id,
+            stock_quantity: qty,
+            sku
+          });
         });
       });
 
-      if (updates.length > 0) await supabase.from('product_variants').upsert(updates);
-      if (inserts.length > 0) await supabase.from('product_variants').upsert(inserts, { onConflict: 'product_id,color_id,size_id' });
+      if (variantRows.length > 0) {
+        const { error: variantsUpsertError } = await supabase
+          .from('product_variants')
+          .upsert(variantRows, { onConflict: 'product_id,color_id,size_id' });
+        if (variantsUpsertError) {
+          throw createEditProductError({
+            code: EDIT_PRODUCT_ERROR_CODES.UPSERT_VARIANTS_FAILED,
+            operation: 'upsert size and stock changes',
+            message: variantsUpsertError.message,
+            details: variantsUpsertError,
+          });
+        }
+      }
 
-      await logAction('UPDATE', 'Product', `Updated product: ${formData.name}`, { productId: id });
+      try {
+        await logAction('UPDATE', 'Product', `Updated product: ${formData.name}`, { productId: id });
+      } catch (logError) {
+        console.error(
+          createEditProductError({
+            code: EDIT_PRODUCT_ERROR_CODES.AUDIT_LOG_FAILED,
+            operation: 'write activity log',
+            message: logError?.message,
+            details: logError,
+          })
+        );
+      }
 
       toast.success("Product updated successfully!");
       navigate('/products');
     } catch (error) {
-      toast.error(error.message);
+      showErrorModal(error?.code ? error : createEditProductError({
+        code: EDIT_PRODUCT_ERROR_CODES.UNEXPECTED,
+        operation: 'save product changes',
+        message: error?.message,
+        details: error,
+      }));
       console.error(error);
     } finally {
       setLoading(false);
@@ -294,6 +456,51 @@ export default function EditProduct() {
   return (
     <div className="max-w-6xl mx-auto pb-32 pt-6 px-6">
       <Toaster position="top-right" richColors />
+
+      {errorModal.open && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-start gap-3 border-b border-slate-100 bg-slate-50 px-6 py-5">
+              <div className="mt-0.5 rounded-full bg-red-50 p-2 text-red-600">
+                <AlertCircle size={20} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h2 className="text-lg font-semibold text-slate-900">{errorModal.title}</h2>
+                <p className="mt-1 text-sm text-slate-600">{errorModal.message}</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeErrorModal}
+                className="rounded-full p-2 text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600"
+                aria-label="Close error dialog"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="space-y-4 px-6 py-5">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Error code</div>
+                <div className="mt-1 font-mono text-sm font-semibold text-slate-900">{errorModal.code}</div>
+              </div>
+
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Please share this code with support if the problem keeps happening.
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={closeErrorModal}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* --- NEW: Full Screen Image Modal --- */}
       {previewImage && (
@@ -433,7 +640,7 @@ export default function EditProduct() {
 
           {/* 4. VARIANTS - UPDATED FOR IMAGE CLICK */}
           <div className="space-y-6">
-            {selectedColorIds.map((colorId, idx) => {
+            {selectedColorIds.map((colorId) => {
               const color = meta.colors.find(c => c.id === colorId);
               const myImages = colorImages[colorId] || [];
               return (
